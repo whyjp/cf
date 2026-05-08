@@ -1,0 +1,19 @@
+{
+  "skill_name": "shipoftheseus:theseus-orchestrator",
+  "skill_version": "0.9.38",
+  "phase": "06-shadow-grade-01",
+  "project_id": "etago",
+  "fingerprint": "etago-shadow-01-v1",
+  "prev_fingerprint": "etago-dacapo-flow-v1",
+  "produced_at": "2026-05-09",
+  "round": 1,
+  "shadow_grader_session": "zero-context",
+  "scores": {
+    "U1": {"intent":0.97,"correctness":0.96,"simplicity":0.96,"extensibility":0.85,"observability":0.95,"testability":0.98,"avg":0.945},
+    "U2": {"intent":0.85,"correctness":0.90,"simplicity":0.85,"extensibility":0.75,"observability":0.85,"testability":0.85,"avg":0.842},
+    "U3": {"intent":0.85,"correctness":0.92,"simplicity":0.75,"extensibility":0.98,"observability":0.90,"testability":0.93,"avg":0.888}
+  },
+  "winner": "U1",
+  "winner_post_dacapo_score": 0.945,
+  "consistency_check_with_main_grader": "PASS"
+}

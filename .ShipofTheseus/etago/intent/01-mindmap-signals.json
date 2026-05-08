@@ -1,0 +1,23 @@
+{
+  "skill_name": "shipoftheseus:theseus-orchestrator",
+  "skill_version": "0.9.38",
+  "phase": "01-mindmap-signals",
+  "project_id": "etago",
+  "fingerprint": "etago-01-mindmap-sig-v1",
+  "prev_fingerprint": "etago-01-grade-sig-v1",
+  "produced_at": "2026-05-09",
+  "mindmap_node_count": 34,
+  "mindmap_axis_count": 6,
+  "mindmap_max_depth": 3,
+  "mindmap_external_systems": ["Naver Map", "Kakao Map"],
+  "mindmap_domain_nouns": ["start", "end", "ETA", "route", "natural language", "auth-free", "fallback chain"],
+  "mindmap_quality_grade": "A",
+  "axis_breakdown": {
+    "목표": {"sub": 4, "max_depth": 3},
+    "제약": {"sub": 4, "max_depth": 1},
+    "기능": {"sub": 4, "max_depth": 2},
+    "품질": {"sub": 4, "max_depth": 2},
+    "도메인": {"sub": 4, "max_depth": 1},
+    "리스크": {"sub": 3, "max_depth": 1}
+  }
+}

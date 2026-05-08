@@ -1,0 +1,21 @@
+{
+  "skill_name": "shipoftheseus:theseus-orchestrator",
+  "skill_version": "0.9.38",
+  "phase": "10-sprint-01-inputs",
+  "project_id": "etago",
+  "fingerprint": "etago-sprint-01-in-v1",
+  "prev_fingerprint": "etago-09-gate-v1",
+  "produced_at": "2026-05-09",
+  "sprint_id": 1,
+  "axis_focus": ["impl", "plan"],
+  "lessons_input": [
+    "L-impl-1: walk-for-pattern adopted — schema drift robust",
+    "L-impl-2: sentinel error分離 → exit code 매트릭스 명료"
+  ],
+  "objective": "Schema robustness — JSON walk helpers handle additional shapes seen in Naver/Kakao responses (numeric vs string, nested arrays, mixed key conventions).",
+  "deliverables": [
+    "internal/route 의 walkForLatLng / walkForDuration / walkForLatLngAlt / walkForDurationSec helpers 의 추가 정합",
+    "추가 unit test (각 walker 의 edge case)"
+  ],
+  "metric": "Naver+Kakao mock fixture pass rate — 4/4 → 6/6 (string-encoded numbers, nested 'place.items', kakao 'documents' alt key)"
+}

@@ -1,0 +1,28 @@
+{
+  "skill_name": "shipoftheseus:theseus-orchestrator",
+  "skill_version": "0.9.38",
+  "phase": "10-sprint-01-report",
+  "project_id": "etago",
+  "fingerprint": "etago-sprint-01-rep-v1",
+  "prev_fingerprint": "etago-sprint-01-in-v1",
+  "produced_at": "2026-05-09",
+  "sprint_id": 1,
+  "delta_artifacts": {
+    "internal/route/naver.go": "walkForLatLng/walkForDuration: numeric + json.Number + string '%f' coercion supported (`numericFromAny` helper)",
+    "internal/route/kakao.go": "walkForLatLngAlt + walkForDurationSec: 'lat'/'lng' alt key 지원 + 'taxiTime' fallback field",
+    "internal/route/naver_test.go": "TestNaver_extractDurationMs_msPath / TestNaver_extractFirstCoord 추가 (string encoded)",
+    "internal/route/kakao_test.go": "TestKakao_extractCoord_alt / TestKakao_extractDurationSec 추가"
+  },
+  "metric_before": "4/4 mock pass",
+  "metric_after": "6/6 mock pass (string + alt key + taxiTime)",
+  "score_delta": {
+    "correctness": 0.0,
+    "extensibility": 0.05,
+    "testability": 0.02
+  },
+  "lessons_out": [
+    "L-sprint-01-1: numericFromAny helper 가 향후 Naver/Kakao schema 변경의 buffer — drift 흡수 효과 확인."
+  ],
+  "regression": false,
+  "verdict": "PASS — sprint goal 달성"
+}

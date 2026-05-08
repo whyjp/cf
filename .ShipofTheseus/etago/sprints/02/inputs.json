@@ -1,0 +1,20 @@
+{
+  "skill_name": "shipoftheseus:theseus-orchestrator",
+  "skill_version": "0.9.38",
+  "phase": "10-sprint-02-inputs",
+  "project_id": "etago",
+  "fingerprint": "etago-sprint-02-in-v1",
+  "prev_fingerprint": "etago-sprint-01-rep-v1",
+  "produced_at": "2026-05-09",
+  "sprint_id": 2,
+  "axis_focus": ["impl", "intent"],
+  "lessons_input": [
+    "Quality gate 3 권고: run(argv, stdout, stderr) integration 테스트 추가."
+  ],
+  "objective": "CLI integration test — run() exit code 매트릭스 검증 (parse 실패 → 2 / unknown source → 2 / panic → 1).",
+  "deliverables": [
+    "cmd/etago/main_test.go 확장 (buildProviders + 기본 usage smoke)",
+    "intent v2 의 §d C3 임계 측정 항목 — sprint 02 metric"
+  ],
+  "metric": "exit code 매트릭스 4/4 (0/1/2/3) integration test"
+}

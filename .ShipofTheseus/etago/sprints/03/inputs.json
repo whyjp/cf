@@ -1,0 +1,22 @@
+{
+  "skill_name": "shipoftheseus:theseus-orchestrator",
+  "skill_version": "0.9.38",
+  "phase": "10-sprint-03-inputs",
+  "project_id": "etago",
+  "fingerprint": "etago-sprint-03-in-v1",
+  "prev_fingerprint": "etago-sprint-02-rep-v1",
+  "produced_at": "2026-05-09",
+  "sprint_id": 3,
+  "axis_focus": ["plan", "impl"],
+  "lessons_input": [
+    "DEC-7 Windows README cp949 의무.",
+    "L-1 (intent review): 비목표의 톨게이트비 잡음 제거 완료, 잔여 noise 검토."
+  ],
+  "objective": "Smoke pair expansion + Windows enforcement + skip-if-offline guard polish.",
+  "deliverables": [
+    "tests/smoke_test.go skipIfOffline guard (1.5s dial)",
+    "5 pair coverage 확장 (Seoul/Suwon/Busan/Songdo/IC pair)",
+    "README Windows hint cementing"
+  ],
+  "metric": "smoke 5 pair × auto-skip-on-offline robustness"
+}

@@ -1,0 +1,26 @@
+# Auto-added by etago (Q-D9 answer 1 — real env paste).
+# Never commit secrets; .env.template is the catalog, .env is the vault.
+.env
+.env.*
+!.env.template
+
+# Build artifacts
+etago/etago
+etago/etago.exe
+etago/dist/
+
+# Test cache + AppControl-workaround compiled tests
+etago/.gocache/
+etago/.gotmp/
+etago/*.test.exe
+etago/cmd-etago.test.exe
+etago/smoke.test.exe
+etago/*.out
+etago/coverage.txt
+
+# IDE
+.vscode/
+.idea/
+
+# OMC harness session-local state (transient)
+.omc/

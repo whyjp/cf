@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>etago — theseus-view (Phase 12, G3 simple)</title>
+<style>
+ body{font:14px/1.55 system-ui,sans-serif;margin:32px;max-width:980px;color:#222}
+ h1{margin:0 0 4px}
+ .meta{color:#666;margin-bottom:24px}
+ table{border-collapse:collapse;margin:12px 0 24px;width:100%}
+ th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;vertical-align:top}
+ th{background:#f4f4f4}
+ .ok{color:#0a0}.warn{color:#a60}.deg{color:#c73}
+ code{background:#f4f4f4;padding:1px 6px;border-radius:3px}
+ .sect{margin:20px 0}
+ .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+</style>
+</head>
+<body>
+<h1>etago</h1>
+<div class="meta">project · grade <b>G3 (Standard)</b> · skill <code>shipoftheseus:theseus-orchestrator@0.9.38</code> · 2026-05-09</div>
+
+<div class="sect">
+<h2>한 줄</h2>
+<p>한국 지도 (Naver/Kakao) 의 인증 없는 공개 웹 엔드포인트로부터 자연어 출발/도착의 차량 추천 루트 <b>소요 시간 단일 값</b>을 STDOUT 으로 내는 Go CLI.</p>
+</div>
+
+<div class="sect">
+<h2>15 페이즈 진행</h2>
+<table>
+<tr><th>#</th><th>페이즈</th><th>활성</th><th>산출물</th><th>verdict</th></tr>
+<tr><td>00</td><td>명명</td><td>G3+</td><td>naming/00-naming.md</td><td class="ok">PASS</td></tr>
+<tr><td>01</td><td>의도 + 마인드맵</td><td>✓</td><td>intent/01-intent.md (A 등급 mindmap, 34 노드)</td><td class="ok">PASS</td></tr>
+<tr><td>02</td><td>의도 리뷰</td><td>G3+</td><td>intent/02-review.md</td><td class="ok">PASS 0.97</td></tr>
+<tr><td>03</td><td>콜드 재이해</td><td>G3+</td><td>intent/03-comprehension.md</td><td class="ok">PASS</td></tr>
+<tr><td>04</td><td>사용자 질의 (유일 인터럽트)</td><td>✓</td><td>intent/04-{questions,answers,autonomy,stack,verification,runtime-prereq,nfr-verifications,audience}.md + refresh-1</td><td class="ok">PASS</td></tr>
+<tr><td>05</td><td>비평 + refresh-2</td><td>G3+</td><td>intent/05-{critique,decisions,refreshed}.md + 01-{1..4}-intent.v2.md + 04-refreshed.md</td><td class="ok">PASS</td></tr>
+<tr><td>06</td><td>AIDE Plan-Tree (폭3)</td><td>✓</td><td>plan/06-plan.md + tournament-01 + dacapo-rerun-01 + dacapo-flow + shadow-grade-01 + candidates/universe-{1,2,3}/ + 07-plan-review</td><td class="ok">PASS — winner U1 (0.945)</td></tr>
+<tr><td>07</td><td>계획 재이해</td><td>G4+</td><td>(G3 비활성)</td><td>—</td></tr>
+<tr><td>08</td><td>구현</td><td>✓</td><td>impl/{candidates/universe-1/, tournament-impl-01, dacapo-flow, 08-impl-log}.md + canonical etago/ Go source</td><td class="ok">PASS — 33 unit + 1 smoke</td></tr>
+<tr><td>09</td><td>품질 게이트 (7)</td><td>✓</td><td>quality/09-quality-gate.md</td><td class="deg">PASS-DEGRADED — gate 7 manual (Go 미설치)</td></tr>
+<tr><td>10</td><td>스프린트 (3 cap)</td><td>G3+</td><td>sprints/01..03/{inputs,report}.json — schema robustness / integration test / smoke 5pair</td><td class="ok">PASS</td></tr>
+<tr><td>11</td><td>회귀 바이섹트</td><td>G4+</td><td>(G3 비활성)</td><td>—</td></tr>
+<tr><td>12</td><td>theseus-view (본 페이지)</td><td>G3 simple</td><td>webview/index.html</td><td class="ok">PASS</td></tr>
+<tr><td>13</td><td>interactive viewer</td><td>G3 옵션</td><td>(skip — 사용자 G3 선택, 옵션)</td><td>SKIP</td></tr>
+<tr><td>14</td><td>핸드오프</td><td>✓</td><td>handoff/14-handoff.md</td><td class="ok">PENDING</td></tr>
+</table>
+</div>
+
+<div class="sect">
+<h2>Tournament (Phase 06)</h2>
+<table>
+<tr><th>Universe</th><th>seed</th><th>avg</th><th>verdict</th></tr>
+<tr><td>U1</td><td>Naver-first sequential</td><td><b>0.945</b> (post-dacapo)</td><td class="ok">WINNER</td></tr>
+<tr><td>U2</td><td>Naver+Kakao race</td><td>0.842</td><td>—</td></tr>
+<tr><td>U3</td><td>Router + plug-in</td><td>0.888</td><td>—</td></tr>
+</table>
+</div>
+
+<div class="sect">
+<h2>인터페이스 (canonical)</h2>
+<pre><code>type NormalizedInput struct{ Start, End string }
+type Duration struct{ Min int; Source string; LatencyMs int }
+type Provider interface{ Name() string; Lookup(ctx, in) (Duration, error) }
+
+func parse.NormalizeInputs(start, end string) (NormalizedInput, error)
+func route.GetDuration(ctx, in, []Provider) (Duration, error)
+func route.NewNaverProvider(client, ua) *NaverProvider
+func route.NewKakaoProvider(client, ua) *KakaoProvider
+func duration.Format(d, in, opts) string</code></pre>
+</div>
+
+<div class="sect">
+<h2>Verification</h2>
+<pre><code>cd D:/github/cf/etago
+go build -o etago.exe ./cmd/etago
+./etago --help
+go test ./...
+./etago "강남역" "수원시청"</code></pre>
+</div>
+
+<div class="sect">
+<h2>Lineage</h2>
+<p>frontmatter <code>prev_fingerprint</code> 체인: <code>00-naming → 01-intent → ... → sprints/03/report</code> (연속 무결).</p>
+</div>
+
+</body>
+</html>

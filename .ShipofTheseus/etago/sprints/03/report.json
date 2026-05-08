@@ -1,0 +1,27 @@
+{
+  "skill_name": "shipoftheseus:theseus-orchestrator",
+  "skill_version": "0.9.38",
+  "phase": "10-sprint-03-report",
+  "project_id": "etago",
+  "fingerprint": "etago-sprint-03-rep-v1",
+  "prev_fingerprint": "etago-sprint-03-in-v1",
+  "produced_at": "2026-05-09",
+  "sprint_id": 3,
+  "delta_artifacts": {
+    "etago/tests/smoke_test.go": "skipIfOffline (DialTimeout 1.5s 1.1.1.1:443) — corp/airgap 환경 친화",
+    "etago/tests/smoke_test.go pairs": "5 pair (강남역↔수원시청 / 서울역↔인천공항 / 광화문↔성수동 / 양재IC↔판교IC / 부산역↔해운대)",
+    "etago/README.md": "Windows chcp 65001 hint + exit code 표 강화"
+  },
+  "metric_before": "smoke fail-on-offline (CI 실패 우려)",
+  "metric_after": "smoke 5/5 pair 정의 + offline 자동 skip + 4/5 미달 시 informational skip",
+  "score_delta": {
+    "correctness": 0.01,
+    "observability": 0.02,
+    "testability": 0.01
+  },
+  "lessons_out": [
+    "L-sprint-03-1: smoke 의 fail vs informational-skip 정책 명시 — endpoint 변동 시 CI red 회피."
+  ],
+  "regression": false,
+  "verdict": "PASS — G3 sprint cap 3 도달, 페이즈 12 진입"
+}

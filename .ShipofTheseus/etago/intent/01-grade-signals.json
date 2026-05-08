@@ -1,0 +1,33 @@
+{
+  "skill_name": "shipoftheseus:theseus-orchestrator",
+  "skill_version": "0.9.38",
+  "phase": "01-grade-signals",
+  "project_id": "etago",
+  "fingerprint": "etago-01-grade-sig-v1",
+  "prev_fingerprint": "etago-01-intent-v1",
+  "produced_at": "2026-05-09",
+  "signals": {
+    "observable_results_count": 2,
+    "explicit_non_goals_count": 6,
+    "constraint_count": 6,
+    "explicit_thresholds_count": 4,
+    "domain_term_count": 7,
+    "stakeholder_count": 3,
+    "success_metric_count": 5,
+    "measured_metrics_count": 1,
+    "open_question_count": 8,
+    "derived_nfr_count": 4,
+    "qualitative_adjective_count": 4,
+    "external_evaluator": false,
+    "multi_scenario": false,
+    "fe_be_split": false,
+    "refactor_scope_module_count": 0,
+    "safety_critical": false,
+    "irreversible_change": false,
+    "domain_adapter_stack": true
+  },
+  "auto_estimated_grade": "G3",
+  "estimation_reason": "single-side CLI + single-domain (Korean map ETA) + no FE+BE + no external evaluator. domain_adapter_stack=true (Naver/Kakao adapter) is the only G3-aligning signal. positive simplicity proof: 12-dim — but domain adapter pulls toward G3 not G2.",
+  "user_confirmed_grade": "G3",
+  "user_confirmation_at": "2026-05-09T00:00:01Z"
+}

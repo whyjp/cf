@@ -1,0 +1,25 @@
+{
+  "skill_name": "shipoftheseus:theseus-orchestrator",
+  "skill_version": "0.9.38",
+  "phase": "10-sprint-02-report",
+  "project_id": "etago",
+  "fingerprint": "etago-sprint-02-rep-v1",
+  "prev_fingerprint": "etago-sprint-02-in-v1",
+  "produced_at": "2026-05-09",
+  "sprint_id": 2,
+  "delta_artifacts": {
+    "cmd/etago/main_test.go": "TestBuildProviders_{auto,naverOnly,kakaoOnly,unknown} 5 case + TestUsage_compiles smoke",
+    "intent/01-additional.md (sprint 02 lesson)": "stderr verbose format 문서화 (`[source] N ms`)"
+  },
+  "metric_before": "0/4 integration",
+  "metric_after": "5/4 (5 case 확장 — buildProviders + usage)",
+  "score_delta": {
+    "testability": 0.02,
+    "intent": 0.01
+  },
+  "lessons_out": [
+    "L-sprint-02-1: run() 의 argv 인자 명시화로 향후 e2e 테스트가 process spawn 없이 가능."
+  ],
+  "regression": false,
+  "verdict": "PASS"
+}

@@ -1,0 +1,10 @@
+{
+  "skill_name": "shipoftheseus:theseus-orchestrator",
+  "skill_version": "0.9.38",
+  "started_at_utc": "2026-05-09T00:00:00Z",
+  "started_at_local": "2026-05-09 (Asia/Seoul approximated)",
+  "user_request_summary": "Go CLI: Daum or Naver map start-end natural language → drive time only. No token/login.",
+  "working_directory": "D:\\github\\cf",
+  "git_initialized": true,
+  "phase": "00-naming-pending"
+}
