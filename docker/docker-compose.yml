@@ -1,0 +1,67 @@
+# Umbrella compose — 두 서비스 동시 부팅용. WSL 에서:
+#     cd /mnt/d/github/cf/docker && docker compose up -d
+#
+# 기본 네트워크 (camfit_net) 공유. 개별 디렉터리의 compose 도 단독 부팅 가능.
+
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: camfit-falkordb
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+      - "3000:3000"
+    volumes:
+      - falkor_data:/data
+    networks: [camfit_net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  rocksdb:
+    build: ./rocksdb
+    container_name: camfit-rocksdb
+    restart: unless-stopped
+    ports:
+      - "8071:8071"
+    volumes:
+      - rocks_data:/data
+    environment:
+      ROCKS_DATA: /data
+    networks: [camfit_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8071/healthz', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: camfit-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: camfit
+      POSTGRES_PASSWORD: camfit
+      POSTGRES_DB: camfit
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [camfit_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U camfit -d camfit"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  falkor_data:
+  rocks_data:
+  pg_data:
+
+networks:
+  camfit_net:
+    driver: bridge
