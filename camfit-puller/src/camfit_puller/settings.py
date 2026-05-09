@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     data_source: Literal["camfit", "local-replay", "mock"] = "local-replay"
     eta_provider: Literal["etago", "mock"] = "etago"
 
-    fe_dir: Path = Path(__file__).resolve().parents[2] / "fe"
+    # NOTE: parents[3] = repo root (cf/) where fe/ lives.
+    # parents[2] = camfit-puller/ where data/ lives.
+    fe_dir: Path = Path(__file__).resolve().parents[3] / "fe"
     data_dir: Path = Path(__file__).resolve().parents[2] / "data"
 
     log_level: str = "INFO"
