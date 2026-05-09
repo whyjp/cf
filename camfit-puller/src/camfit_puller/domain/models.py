@@ -111,5 +111,10 @@ class Mark(BaseModel):
     camp_id: str
     axis: str                                  # 'management' | 'view' | 'kids' | ...
     level: Literal["bib", "recommended", "notable", "exceptional"]
-    score: float = Field(ge=-3.0, le=3.0)      # raw temperature-weighted score
+    # Aggregated SUM(score) across all concepts in the axis from
+    # camp_review_signals. With ~5+ concepts × per-concept score in [-1, +1]
+    # weighted by intensity up to 2.0, the theoretical envelope is ±10.
+    # Quantile-bucketed in compute_marks; the magnitude carries no UI meaning
+    # beyond ranking, so a generous bound is fine.
+    score: float = Field(ge=-10.0, le=10.0)
     evidence: Optional[str] = None
