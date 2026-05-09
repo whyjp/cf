@@ -1,42 +1,42 @@
 """FastAPI read API consumed by fe/index.html.
 
-Endpoints:
-    GET /sites?region=&category=&facility=&bbox=lon1,lat1,lon2,lat2
-    GET /sites/{id}
-    GET /facets             (regions/categories/facilities counts)
-    GET /healthz
+All handlers depend on `Container` (composition root) — never on concrete
+adapters. PG is the truth; FalkorDB is the derived graph; semantic search uses
+pgvector.
 
-Sources:
-    - Primary list: FalkorDB (Cypher) for filterable graph queries.
-    - Detail: FalkorDB KG only (RocksDB removed in T36; full PG migration in T37).
+RocksDB removed in T36. ROCKS_BASE / camp:* / detail:* / reviews:* keys gone.
 """
 from __future__ import annotations
-
-import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from falkordb import FalkorDB
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .etago_adapter import EtagoClient, EtagoUnavailable
+from .settings import Settings
+from .container import Container
+from .domain.errors import CampNotFound
 
 
-FALKOR_HOST = os.environ.get("FALKOR_HOST", "localhost")
-FALKOR_PORT = int(os.environ.get("FALKOR_PORT", "6379"))
-FALKOR_GRAPH = os.environ.get("FALKOR_GRAPH", "camfit")
-FE_DIR = os.environ.get("CAMFIT_FE_DIR", str(Path(__file__).resolve().parents[3] / "fe"))
+_settings = Settings()
+_container = Container(_settings)
 
 
 def _falkor():
-    return FalkorDB(host=FALKOR_HOST, port=FALKOR_PORT).select_graph(FALKOR_GRAPH)
+    """Return a raw FalkorDB graph handle.
+
+    Kept as a module-level function so tests can monkeypatch it directly
+    (``monkeypatch.setattr(api_mod, "_falkor", lambda: fake)``).  All
+    /graph/* route handlers call this instead of _container.graph so the
+    existing test suite works without changes.
+    """
+    return _container.graph._g()
 
 
-app = FastAPI(title="camfit-puller API")
+app = FastAPI(title="camfit-puller API (P2)")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -45,390 +45,233 @@ app.add_middleware(
 )
 
 
-# Lazy etago client — instantiated on first use so the API can boot even if
-# the etago binary is absent. Endpoints surface a clean 503 in that case.
-_etago: Optional[EtagoClient] = None
-
-
-def _get_etago() -> EtagoClient:
-    global _etago
-    if _etago is None:
-        try:
-            _etago = EtagoClient()
-        except EtagoUnavailable as e:
-            raise HTTPException(503, str(e))
-    return _etago
-
+# ───────────────────────── Health ─────────────────────────
 
 @app.get("/healthz")
 def healthz() -> dict:
-    status = {"falkor": "down", "etago": "down"}
+    status: dict[str, str] = {
+        "postgres": "down",
+        "falkor": "down",
+        "embedder": "down",
+        "etago": "down",
+        "geocoder": "down",
+    }
     try:
-        _falkor().query("RETURN 1")
-        status["falkor"] = "up"
+        _container.camps_read.count()
+        status["postgres"] = "up"
     except Exception:
         pass
     try:
-        EtagoClient()  # will raise if binary not found
+        if _container.graph.healthcheck():
+            status["falkor"] = "up"
+    except Exception:
+        pass
+    try:
+        # Just confirm the property is reachable; don't load the model on every healthz.
+        # The property is cached after first access.
+        embedder_name = _settings.embedder
+        status["embedder"] = embedder_name
+    except Exception:
+        pass
+    try:
+        from .adapters.eta.etago_subprocess import EtagoSubprocessProvider
+        EtagoSubprocessProvider()  # raises if binary missing
         status["etago"] = "up"
-    except EtagoUnavailable:
+    except Exception:
+        pass
+    try:
+        # geocoder is lazy; just verify config
+        status["geocoder"] = _settings.geocoder
+    except Exception:
         pass
     return status
 
 
-@app.get("/facets")
-def facets() -> dict:
-    out = {"regions": [], "categories": [], "facilities": []}
-    try:
-        g = _falkor()
-        rs = g.query(
-            "MATCH (r:Region)<-[:LOCATED_IN]-(c:Camp) "
-            "RETURN r.sido AS sido, r.sigungu AS sigungu, count(c) AS n "
-            "ORDER BY n DESC"
-        ).result_set
-        out["regions"] = [{"sido": r[0], "sigungu": r[1], "count": int(r[2])} for r in rs]
-        rs = g.query(
-            "MATCH (cat:Category)<-[:HAS_CATEGORY]-(c:Camp) "
-            "RETURN cat.name AS name, count(c) AS n ORDER BY n DESC"
-        ).result_set
-        out["categories"] = [{"name": r[0], "count": int(r[1])} for r in rs]
-        rs = g.query(
-            "MATCH (f:Facility)<-[:HAS_FACILITY]-(c:Camp) "
-            "RETURN f.name AS name, count(c) AS n ORDER BY n DESC"
-        ).result_set
-        out["facilities"] = [{"name": r[0], "count": int(r[1])} for r in rs]
-    except Exception as e:
-        return JSONResponse(out, status_code=200, headers={"X-Warning": f"falkor: {type(e).__name__}"})
-    return out
+# ───────────────────────── Sites (list / detail / search) ────────────────
+
+@app.get("/sites/search")
+def site_search(q: str = Query(..., min_length=1), k: int = 20) -> list[dict]:
+    """Semantic search over camp embeddings."""
+    if not q.strip():
+        return []
+    camps = _container.semantic_search().execute(q.strip(), k=max(1, min(k, 100)))
+    return [c.model_dump() for c in camps]
 
 
-def _parse_bbox(bbox: Optional[str]) -> Optional[tuple[float, float, float, float]]:
-    if not bbox:
-        return None
-    parts = bbox.split(",")
-    if len(parts) != 4:
-        return None
+@app.get("/sites/{site_id}/similar")
+def site_similar(site_id: str, k: int = 10) -> list[dict]:
+    """KNN nearest-neighbor camps to the given camp."""
+    vec = _container.vector.get(site_id)
+    if vec is None:
+        raise HTTPException(404, f"no embedding for camp {site_id}; run BuildEmbeddings first")
+    hits = _container.vector.knn(vec, k=k + 1)  # +1 to exclude self
+    other_ids = [cid for cid, _ in hits if cid != site_id][:k]
+    by_id = {c.id: c for c in _container.camps_read.list_filtered(ids=other_ids)}
+    return [by_id[cid].model_dump() for cid in other_ids if cid in by_id]
+
+
+@app.get("/sites/{site_id}")
+def site_detail(site_id: str) -> dict:
     try:
-        a, b, c, d = (float(x) for x in parts)
-        return a, b, c, d
-    except ValueError:
-        return None
+        return _container.get_site_detail().execute(site_id)
+    except CampNotFound:
+        raise HTTPException(404, f"camp not found: {site_id}")
 
 
 @app.get("/sites")
 def sites(
     region: Optional[str] = None,
-    category: Optional[str] = None,
-    facility: Optional[str] = None,
-    has_valley: Optional[bool] = None,
-    has_kids: Optional[bool] = None,
-    has_trampoline: Optional[bool] = None,
+    sigungu: Optional[str] = None,
+    concept: Optional[list[str]] = Query(None, description="AND of concepts (repeat ?concept=)"),
+    concepts_any: Optional[str] = Query(None, description="OR of concepts (comma-separated)"),
+    min_score: Optional[float] = None,
+    max_score: Optional[float] = None,
     bbox: Optional[str] = Query(None, description="lon1,lat1,lon2,lat2"),
     limit: int = 2000,
 ) -> list[dict]:
-    where = ["c.id IS NOT NULL"]
-    params: dict = {"limit": limit}
-    if region:
-        where.append("(r.sido = $region OR r.sigungu = $region)")
-        params["region"] = region
-    if has_valley is not None:
-        where.append("c.has_valley = $hv")
-        params["hv"] = bool(has_valley)
-    if has_kids is not None:
-        where.append("c.has_kids = $hk")
-        params["hk"] = bool(has_kids)
-    if has_trampoline is not None:
-        where.append("c.has_trampoline = $ht")
-        params["ht"] = bool(has_trampoline)
-    bb = _parse_bbox(bbox)
-    if bb:
-        lon1, lat1, lon2, lat2 = bb
-        where.append("c.lon >= $lon1 AND c.lon <= $lon2 AND c.lat >= $lat1 AND c.lat <= $lat2")
-        params.update({"lon1": min(lon1, lon2), "lon2": max(lon1, lon2),
-                       "lat1": min(lat1, lat2), "lat2": max(lat1, lat2)})
-
-    where_clause = " AND ".join(where)
-    cypher = (
-        "MATCH (c:Camp)-[:LOCATED_IN]->(r:Region) "
-        f"WHERE {where_clause} "
+    bb: Optional[tuple[float, float, float, float]] = None
+    if bbox:
+        try:
+            parts = [float(x) for x in bbox.split(",")]
+            if len(parts) == 4:
+                bb = (parts[0], parts[1], parts[2], parts[3])
+        except ValueError:
+            pass
+    any_list = [s.strip() for s in concepts_any.split(",")] if concepts_any else None
+    rows = _container.camps_read.list_filtered(
+        sido=region, sigungu=sigungu,
+        concept=concept, concepts_any=any_list,
+        min_score=min_score, max_score=max_score,
+        bbox=bb, limit=limit,
     )
-    if category:
-        cypher += "MATCH (c)-[:HAS_CATEGORY]->(:Category {name: $category}) "
-        params["category"] = category
-    if facility:
-        cypher += "MATCH (c)-[:HAS_FACILITY]->(:Facility {name: $facility}) "
-        params["facility"] = facility
-    # Two sequential WITH+collect to avoid cartesian product across categories × facilities.
-    cypher += (
-        "OPTIONAL MATCH (c)-[:HAS_CATEGORY]->(cat:Category) "
-        "WITH c, r, collect(DISTINCT cat.name) AS cats "
-        "OPTIONAL MATCH (c)-[:HAS_FACILITY]->(f:Facility) "
-        "WITH c, r, cats, collect(DISTINCT f.name) AS facs "
-        "RETURN c.id, c.name, c.lat, c.lon, r.sido, r.sigungu, "
-        "       c.has_valley, c.has_kids, c.has_trampoline, c.url, cats, facs "
-        "LIMIT $limit"
-    )
-
-    try:
-        rs = _falkor().query(cypher, params=params).result_set
-    except Exception:
-        return []
-    out: list[dict] = []
-    for row in rs:
-        out.append({
-            "id": row[0],
-            "name": row[1],
-            "lat": row[2],
-            "lon": row[3],
-            "sido": row[4],
-            "sigungu": row[5],
-            "has_valley": bool(row[6]),
-            "has_kids": bool(row[7]),
-            "has_trampoline": bool(row[8]),
-            "url": row[9],
-            "categories": [c for c in (row[10] or []) if c],
-            "facilities": [f for f in (row[11] or []) if f],
-        })
-    return out
+    return [c.model_dump() for c in rows]
 
 
-@app.get("/sites/{site_id}")
-def site_detail(site_id: str) -> dict:
-    """Camp detail from FalkorDB KG.
+# ───────────────────────── Facets ─────────────────────────
 
-    Response shape:
-        { ...summary fields..., detail: null, reviews: null }
+@app.get("/facets")
+def facets() -> dict:
+    """Returns regions/concepts/themes counts. Read from PG (source of truth).
 
-    # T37: TODO migrate to GetSiteDetail use-case (PG-backed detail + reviews).
-    # RocksDB was removed in T36. detail/reviews fields are null until T37 wires PG.
+    `axis` concepts (with `is_axis=true`) are surfaced separately for FE
+    primary toggles vs the long tail of dynamic concept chips.
     """
-    summary: dict | None = None
-    detail: dict | None = None
-    reviews: dict | None = None
-
-    # T37: TODO fetch detail and reviews from PG (GetSiteDetail use-case).
-
-    # KG lookup for summary.
+    out: dict = {"regions": [], "concept_axes": [], "concepts": [], "themes": []}
     try:
-        rs = _falkor().query(
-            "MATCH (c:Camp {id: $id})-[:LOCATED_IN]->(r:Region) "
-            "OPTIONAL MATCH (c)-[:HAS_CATEGORY]->(cat:Category) "
-            "OPTIONAL MATCH (c)-[:HAS_FACILITY]->(f:Facility) "
-            "RETURN c.id, c.name, c.lat, c.lon, c.url, r.sido, r.sigungu, "
-            "       collect(DISTINCT cat.name), collect(DISTINCT f.name)",
-            params={"id": site_id},
-        ).result_set
-        if not rs:
-            raise HTTPException(404, f"camp {site_id} not found")
-        row = rs[0]
-        summary = {
-            "id": row[0], "name": row[1], "lat": row[2], "lon": row[3], "url": row[4],
-            "region_sido": row[5], "region_sigungu": row[6],
-            "categories": [c for c in row[7] if c],
-            "facilities": [f for f in row[8] if f],
-            "_source": "kg-only",
-        }
-    except HTTPException:
-        raise
+        # Region buckets: distinct (sido, sigungu) with counts.
+        with _container._pg.conn() as c, c.cursor() as cur:
+            cur.execute("""
+                SELECT sido, sigungu, count(*) FROM camps
+                WHERE sido IS NOT NULL GROUP BY sido, sigungu ORDER BY count(*) DESC
+            """)
+            out["regions"] = [{"sido": r[0], "sigungu": r[1], "count": int(r[2])} for r in cur.fetchall()]
+
+            # Concept axis vs non-axis (with PG matview backing camp counts)
+            cur.execute("""
+                SELECT c.id, c.name, c.category, c.is_axis,
+                       (SELECT count(*) FROM camp_concept_aggregated agg
+                        WHERE agg.concept_id = c.id AND agg.final_score > 0) AS n
+                FROM concepts c
+                ORDER BY n DESC NULLS LAST
+            """)
+            for r in cur.fetchall():
+                bucket = "concept_axes" if r[3] else "concepts"
+                out[bucket].append({
+                    "id": r[0], "name": r[1], "category": r[2],
+                    "is_axis": bool(r[3]), "count": int(r[4] or 0),
+                })
+
+        for theme in _container.theme_repo.all():
+            out["themes"].append({
+                "id": theme.id, "label": theme.label,
+                "count": theme.member_count, "manual_label": theme.manual_label,
+            })
     except Exception as e:
-        raise HTTPException(503, f"falkor unavailable: {e}")
-
-    enriched = dict(summary)
-    if detail:
-        # Surface the most useful detail fields directly + keep raw under "_detail".
-        enriched.setdefault("description", detail.get("description"))
-        enriched.setdefault("address1", detail.get("address1"))
-        enriched.setdefault("address2", detail.get("address2"))
-        enriched.setdefault("brief", detail.get("brief"))
-        enriched.setdefault("locationBrief", detail.get("locationBrief"))
-        enriched.setdefault("contact", detail.get("contact"))
-        enriched.setdefault("hashtags", detail.get("hashtags") or [])
-        enriched.setdefault("locationTypes", detail.get("locationTypes") or [])
-        # Merge facility lists for FE display
-        f_inv = list(detail.get("facilities") or [])
-        f_add = list(detail.get("additionalFacilities") or [])
-        merged_facs = sorted(set((enriched.get("facilities") or []) + f_inv + f_add))
-        enriched["facilities"] = merged_facs
-        # Pricing
-        enriched.setdefault("priceStartFrom", detail.get("priceStartFrom"))
-        enriched.setdefault("priceEndTo", detail.get("priceEndTo"))
-        # Photo medias — slim to URLs
-        medias = detail.get("medias") or []
-        slim = []
-        for m in medias[:8]:
-            slim.append({
-                "url": m.get("url"),
-                "thumb": ((m.get("formats") or {}).get("small") or {}).get("url") or m.get("url"),
-            })
-        enriched["photos"] = slim
-        enriched["numOfReviews"] = (
-            (reviews or {}).get("pagination", {}).get("total")
-            or detail.get("numOfReviews")
-            or 0
-        )
-        enriched["bookmarkCount"] = detail.get("bookmarkCount")
-
-    if reviews:
-        items = []
-        # Sort by totalScore (recommend), top 3
-        rsorted = sorted(reviews.get("reviews") or [], key=lambda r: -(r.get("totalScore") or 0))[:3]
-        for rv in rsorted:
-            items.append({
-                "user": (rv.get("user") or {}).get("nickname") or "익명",
-                "season": rv.get("season"),
-                "userType": rv.get("userType"),
-                "score": rv.get("totalScore"),
-                "text": rv.get("text") or "",
-                "numOfDays": rv.get("numOfDays"),
-            })
-        enriched["reviews_top"] = items
-        enriched["reviews_total"] = (reviews.get("pagination") or {}).get("total")
-
-    return enriched
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# ETA (drive-time filter) — wraps sibling `etago` Go binary
-# ─────────────────────────────────────────────────────────────────────────
-
-
-def _place_for_camp(payload: dict) -> str:
-    """Pick the most etago-friendly place string from a camp record.
-
-    etago wraps Naver/Kakao web map search — these geocode best with
-    *administrative* place names (시도+시군구), not free-form camp names or
-    addresses with apartment/lot numbers. Order:
-        1. ``region_sido + region_sigungu`` (e.g. "강원 평창군")  ← preferred
-        2. ``region_sigungu`` alone
-        3. ``address`` (full address; works only for clean real addresses)
-        4. camp name as last resort
-    """
-    sido = (payload.get("region_sido") or "").strip()
-    sigungu = (payload.get("region_sigungu") or "").strip()
-    region = " ".join(filter(None, [sido, sigungu])).strip()
-    if region:
-        return region
-    if sigungu:
-        return sigungu
-    addr = (payload.get("address") or "").strip()
-    if addr:
-        return addr
-    return (payload.get("name") or payload.get("id", "")).strip()
-
-
-def _camp_lookup(ids: list[str]) -> dict[str, dict]:
-    """Resolve camp ids → row payload via FalkorDB KG.
-
-    # T37: TODO enrich with PG row-store data (GetSiteDetail use-case).
-    """
-    out: dict[str, dict] = {}
-    try:
-        g = _falkor()
-        for cid in ids:
-            rs = g.query(
-                "MATCH (c:Camp {id: $id})-[:LOCATED_IN]->(r:Region) "
-                "RETURN c.id, c.name, r.sido, r.sigungu, c.address, c.lat, c.lon",
-                params={"id": cid},
-            ).result_set
-            if rs:
-                row = rs[0]
-                out[cid] = {
-                    "id": row[0], "name": row[1],
-                    "region_sido": row[2], "region_sigungu": row[3],
-                    "address": row[4], "lat": row[5], "lon": row[6],
-                }
-    except Exception:
-        pass
+        return JSONResponse(out, status_code=200, headers={"X-Warning": f"facets: {type(e).__name__}: {e}"})
     return out
 
 
-@app.get("/eta")
-async def eta_one(
-    origin: str = Query(..., description="출발지 (지명 텍스트)"),
-    dest: str = Query(..., description="도착지 (지명 텍스트)"),
-    timeout_s: float = Query(12.0, ge=2.0, le=60.0),
-) -> dict:
-    """단건 ETA — 두 지명 간 차량 추천 루트 분 단위 시간."""
-    client = _get_etago()
-    r = await client.fetch(origin, dest, timeout_s)
-    return r.to_dict()
+# ───────────────────────── Concepts / Themes ────────────────────
 
+@app.get("/concepts")
+def concepts() -> list[dict]:
+    return [c.model_dump() for c in _container.concept_repo.all()]
+
+
+@app.get("/concepts/{name}/camps")
+def concept_camps(name: str, min_score: float = 0.3, limit: int = 200) -> list[dict]:
+    rows = _container.camps_read.list_filtered(
+        concept=[name], min_score=min_score, limit=limit,
+    )
+    return [c.model_dump() for c in rows]
+
+
+@app.get("/themes")
+def themes() -> list[dict]:
+    return [
+        {"id": t.id, "label": t.label, "count": t.member_count, "manual_label": t.manual_label}
+        for t in _container.theme_repo.all()
+    ]
+
+
+@app.get("/themes/{theme_id}/camps")
+def theme_camps(theme_id: str, limit: int = 200) -> list[dict]:
+    with _container._pg.conn() as c, c.cursor() as cur:
+        cur.execute("SELECT camp_id FROM camp_themes WHERE theme_id=%s LIMIT %s", (theme_id, limit))
+        ids = [r[0] for r in cur.fetchall()]
+    if not ids:
+        return []
+    rows = _container.camps_read.list_filtered(ids=ids, limit=limit)
+    return [c.model_dump() for c in rows]
+
+
+# ───────────────────────── ETA ─────────────────────────
 
 class EtaBatchRequest(BaseModel):
-    origin: str = Field(..., description="출발지 지명")
+    origin: str = Field(..., min_length=1)
     ids: list[str] = Field(..., min_length=1, max_length=500)
-    max_minutes: Optional[int] = Field(None, ge=1, le=1440, description="최대 시간 분(이내만 within=true)")
+    max_minutes: Optional[int] = Field(None, ge=1, le=1440)
     concurrency: int = Field(4, ge=1, le=12)
     timeout_s: float = Field(12.0, ge=2.0, le=60.0)
 
 
+@app.get("/eta")
+def eta_one(
+    origin: str = Query(..., min_length=1),
+    dest: str = Query(..., min_length=1),
+    timeout_s: float = Query(12.0, ge=2.0, le=60.0),
+) -> dict:
+    r = _container.eta.drive_eta(origin, dest, timeout_s=timeout_s)
+    return r.model_dump()
+
+
 @app.post("/eta/batch")
-async def eta_batch(req: EtaBatchRequest) -> dict:
-    """일괄 ETA — 캠프 id 리스트에 대해 origin 으로부터 차량 ETA 계산.
-
-    응답:
-        {
-          "origin": "강남역",
-          "max_minutes": 90,
-          "checked": 30,
-          "within_count": 7,
-          "results": [
-            {"id":"mock-001","minutes":58,"source":"kakao","within":true,"place":"경기 가평군"},
-            {"id":"mock-002","minutes":146,"within":false,...},
-            ...
-          ]
-        }
-    """
-    client = _get_etago()
-    rows = _camp_lookup(req.ids)
-    pairs: list[tuple[str, str]] = []
-    place_for: dict[str, str] = {}
-    for cid in req.ids:
-        if cid not in rows:
-            continue
-        place = _place_for_camp(rows[cid])
-        if not place:
-            continue
-        pairs.append((cid, place))
-        place_for[cid] = place
-
-    raw = await client.fetch_many(req.origin, pairs, concurrency=req.concurrency, timeout_s=req.timeout_s)
-
-    results: list[dict] = []
-    within = 0
-    for cid in req.ids:
-        if cid not in raw:
-            results.append({"id": cid, "minutes": None, "error": "no place name", "within": False})
-            continue
-        r = raw[cid]
-        ok = r.minutes is not None and (req.max_minutes is None or r.minutes <= req.max_minutes)
-        if ok:
-            within += 1
-        results.append({
-            "id": cid,
-            "minutes": r.minutes,
-            "source": r.source,
-            "error": r.error,
-            "place": place_for.get(cid),
-            "within": ok,
-        })
-
-    return {
-        "origin": req.origin,
-        "max_minutes": req.max_minutes,
-        "checked": len(results),
-        "within_count": within,
-        "results": results,
-    }
+def eta_batch(req: EtaBatchRequest) -> dict:
+    return _container.eta_for_fleet().execute(
+        req.origin, req.ids,
+        max_minutes=req.max_minutes,
+        concurrency=req.concurrency,
+        timeout_s=req.timeout_s,
+    )
 
 
 @app.delete("/eta/cache")
 def eta_cache_clear() -> dict:
-    """ETA 메모리 캐시 비우기 (origin 변경 시 재산정 용)."""
-    global _etago
-    if _etago is not None:
-        _etago.clear_cache()
-    return {"cleared": True}
+    n = _container.eta_cache.clear()
+    return {"cleared": int(n)}
+
+
+# ───────────────────────── Admin (P2 pipeline triggers) ────────────
+
+@app.post("/admin/rebuild-graph")
+def rebuild_graph() -> dict:
+    return _container.rebuild_graph().execute()
+
+
+@app.post("/admin/reembed")
+def reembed() -> dict:
+    n = _container.build_embeddings().execute()
+    return {"camps_embedded": n}
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -438,7 +281,7 @@ def eta_cache_clear() -> dict:
 # (CALL db.labels / db.relationshipTypes), node payloads are returned as
 # `properties(n)` maps so the FE can dump unknown shapes generically.
 # Natural keys for synthetic Cytoscape ids are looked up per-label; unknown
-# labels fall back to `id` then first property key.
+# labels fall back to `_pick_natural_key(props)` which scans common id-ish keys.
 # ─────────────────────────────────────────────────────────────────────────
 
 # Composite primary keys per known label. Unknown labels fall back to
@@ -512,7 +355,7 @@ def graph_schema() -> dict:
           "edges":  [{"name": "LOCATED_IN", "count": 2934}, ...]
         }
     """
-    out = {"labels": [], "edges": []}
+    out: dict[str, list] = {"labels": [], "edges": []}
     try:
         g = _falkor()
         rs = g.query("CALL db.labels()").result_set
@@ -622,7 +465,7 @@ def graph_sample(
                 "       labels(m)[0] AS l_m, properties(m) AS p_m "
                 "LIMIT $limit"
             )
-            params = {"labels": label_list, "limit": limit}
+            params: dict[str, Any] = {"labels": label_list, "limit": limit}
         else:
             cy = (
                 "MATCH (n)-[r]-(m) "
@@ -767,7 +610,8 @@ def graph_search(
     return {"nodes": list(nodes.values()), "edges": []}
 
 
-# Mount fe/ static dir at /  — serves index.html.
-fe_path = Path(FE_DIR)
+# ───────────────────────── FE static mount ─────────────────────
+
+fe_path = _settings.fe_dir
 if fe_path.is_dir():
     app.mount("/", StaticFiles(directory=str(fe_path), html=True), name="fe")
