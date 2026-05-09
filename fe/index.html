@@ -532,23 +532,32 @@ function MultiChip({ value, label, count, active, onPick, color }) {
   );
 }
 
-function FilterRow({ heading, set, items, onToggle, onClear }) {
+function FilterRow({ heading, set, items, onToggle, onClear, slotKey, collapsed, onToggleCollapse }) {
   // items: [{ value, label, count }]; render nothing if empty
   if (!items || items.length === 0) return null;
   const selectedCount = set ? set.size : 0;
+  const isCollapsed = !!collapsed;
+  // Show count when collapsed (chips hidden) or when 2+ selected (existing behavior).
+  const showCount = selectedCount > 0 && (isCollapsed || selectedCount >= 2);
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1 shrink-0">
-        {heading}{selectedCount >= 2 ? <span className="ml-1 text-[color:var(--ember)] num">({selectedCount})</span> : null}
-      </span>
-      {selectedCount > 0 && (
+      <button
+        type="button"
+        onClick={() => onToggleCollapse && slotKey && onToggleCollapse(slotKey)}
+        className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1 shrink-0 inline-flex items-center gap-1 hover:text-stone-700"
+        title={isCollapsed ? "펼치기" : "접기"}>
+        <span className="opacity-50 num" style={{ width: "0.7em", display: "inline-block", textAlign: "center" }}>{isCollapsed ? "▸" : "▾"}</span>
+        <span>{heading}</span>
+        {showCount ? <span className="ml-1 text-[color:var(--ember)] num">({selectedCount})</span> : null}
+      </button>
+      {!isCollapsed && selectedCount > 0 && (
         <button
           onClick={(e) => { e.preventDefault(); onClear(); }}
           className="chip"
           style={{ background: "rgba(26,26,23,0.04)", color: "rgba(26,26,23,0.55)", borderColor: "rgba(26,26,23,0.18)" }}
           title="이 차원 선택 해제">×</button>
       )}
-      {items.map(it => (
+      {!isCollapsed && items.map(it => (
         <MultiChip
           key={it.value}
           value={it.value}
@@ -652,6 +661,38 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
   const makeClear = (key) =>
     () => setFilters(prev => ({ ...prev, [key]: new Set() }));
 
+  // Collapse state — keys are slotKeys for FilterRows + "__section:semantic"/"__section:direct"
+  // for the two section headers. Persisted to localStorage so user's choice survives refresh.
+  // Default: feature axes + region visible; both semantic & direct sections collapsed.
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      const raw = localStorage.getItem("cf:filterCollapse");
+      if (raw) return new Set(JSON.parse(raw));
+    } catch (e) { /* ignore parse/storage errors */ }
+    return new Set(["__section:semantic", "__section:direct"]);
+  });
+  useEffect(() => {
+    try { localStorage.setItem("cf:filterCollapse", JSON.stringify([...collapsed])); }
+    catch (e) { /* quota / private mode — non-fatal */ }
+  }, [collapsed]);
+  const toggleCollapsed = useCallback((key) => {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const semanticCollapsed = collapsed.has("__section:semantic");
+  const directCollapsed = collapsed.has("__section:direct");
+  const semanticActiveCount = CONCEPT_FILTER_KEYS.reduce(
+    (n, k) => n + ((filters[k] && filters[k].size) || 0), 0);
+  const directActiveCount =
+    (filters.terrain.size || 0) +
+    (filters.facilityRaw.size || 0) +
+    (filters.collection.size || 0) +
+    (filters.management.size || 0);
+
   // Sido row uses the multi-select helper too.
   const regionItems = useMemo(
     () => sidoSet.map(s => ({ value: s, label: s })),
@@ -696,6 +737,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       {/* Region — multi-select sido */}
       <FilterRow
         heading="지역"
+        slotKey="region"
+        collapsed={collapsed.has("region")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.region}
         items={regionItems}
         onToggle={makeToggle("region")}
@@ -703,10 +747,21 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
 
       {/* ── 시멘틱 필터 — driven by /facets.concepts.category ── */}
-      <div className="text-[10px] uppercase tracking-[0.2em] text-stone-400 pt-1 border-t hairline">시멘틱 필터</div>
+      <button
+        type="button"
+        onClick={() => toggleCollapsed("__section:semantic")}
+        className="w-full text-left text-[10px] uppercase tracking-[0.2em] text-stone-400 pt-1 border-t hairline inline-flex items-center gap-1.5 hover:text-stone-600">
+        <span className="opacity-50 num" style={{ width: "0.7em", display: "inline-block", textAlign: "center" }}>{semanticCollapsed ? "▸" : "▾"}</span>
+        <span>시멘틱 필터</span>
+        {semanticActiveCount > 0 ? <span className="ml-1 text-[color:var(--ember)] num">({semanticActiveCount})</span> : null}
+      </button>
 
+      {!semanticCollapsed && (<>
       <FilterRow
         heading="컨셉 축"
+        slotKey="conceptAxis"
+        collapsed={collapsed.has("conceptAxis")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.conceptAxis}
         items={conceptAxes}
         onToggle={makeToggle("conceptAxis")}
@@ -714,6 +769,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="자연뷰"
+        slotKey="view"
+        collapsed={collapsed.has("view")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.view}
         items={conceptsByCat.view || []}
         onToggle={makeToggle("view")}
@@ -721,6 +779,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="시설"
+        slotKey="facility"
+        collapsed={collapsed.has("facility")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.facility}
         items={conceptsByCat.facility || []}
         onToggle={makeToggle("facility")}
@@ -728,6 +789,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="키즈시설"
+        slotKey="kidsFacility"
+        collapsed={collapsed.has("kidsFacility")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.kidsFacility}
         items={conceptsByCat.kids_facility || []}
         onToggle={makeToggle("kidsFacility")}
@@ -735,6 +799,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="사이트 재질"
+        slotKey="surface"
+        collapsed={collapsed.has("surface")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.surface}
         items={conceptsByCat.surface || []}
         onToggle={makeToggle("surface")}
@@ -742,6 +809,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="사이트 공간"
+        slotKey="space"
+        collapsed={collapsed.has("space")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.space}
         items={conceptsByCat.space || []}
         onToggle={makeToggle("space")}
@@ -749,6 +819,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="주차"
+        slotKey="parking"
+        collapsed={collapsed.has("parking")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.parking}
         items={conceptsByCat.parking || []}
         onToggle={makeToggle("parking")}
@@ -756,6 +829,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="대상"
+        slotKey="audience"
+        collapsed={collapsed.has("audience")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.audience}
         items={conceptsByCat.audience || []}
         onToggle={makeToggle("audience")}
@@ -763,17 +839,32 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="분위기"
+        slotKey="vibe"
+        collapsed={collapsed.has("vibe")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.vibe}
         items={conceptsByCat.vibe || []}
         onToggle={makeToggle("vibe")}
         onClear={makeClear("vibe")}
       />
+      </>)}
 
       {/* ── 직접 필터 — read raw fields off /sites rows ── */}
-      <div className="text-[10px] uppercase tracking-[0.2em] text-stone-400 pt-1 border-t hairline">직접 필터</div>
+      <button
+        type="button"
+        onClick={() => toggleCollapsed("__section:direct")}
+        className="w-full text-left text-[10px] uppercase tracking-[0.2em] text-stone-400 pt-1 border-t hairline inline-flex items-center gap-1.5 hover:text-stone-600">
+        <span className="opacity-50 num" style={{ width: "0.7em", display: "inline-block", textAlign: "center" }}>{directCollapsed ? "▸" : "▾"}</span>
+        <span>직접 필터</span>
+        {directActiveCount > 0 ? <span className="ml-1 text-[color:var(--ember)] num">({directActiveCount})</span> : null}
+      </button>
 
+      {!directCollapsed && (<>
       <FilterRow
         heading="지형"
+        slotKey="terrain"
+        collapsed={collapsed.has("terrain")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.terrain}
         items={terrainItems}
         onToggle={makeToggle("terrain")}
@@ -781,6 +872,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="시설(원본)"
+        slotKey="facilityRaw"
+        collapsed={collapsed.has("facilityRaw")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.facilityRaw}
         items={facilityRawItems}
         onToggle={makeToggle("facilityRaw")}
@@ -788,6 +882,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="컬렉션"
+        slotKey="collection"
+        collapsed={collapsed.has("collection")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.collection}
         items={collectionItems}
         onToggle={makeToggle("collection")}
@@ -795,11 +892,15 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
       />
       <FilterRow
         heading="관리수준"
+        slotKey="management"
+        collapsed={collapsed.has("management")}
+        onToggleCollapse={toggleCollapsed}
         set={filters.management}
         items={managementItems}
         onToggle={makeToggle("management")}
         onClear={makeClear("management")}
       />
+      </>)}
     </div>
   );
 }
@@ -1094,7 +1195,8 @@ function DetailPanel({ id, onClose, eta }) {
 // ─────────────────────────────────────────────────────────────
 // Root
 // ─────────────────────────────────────────────────────────────
-function EtaBar({ origin, setOrigin, hours, setHours, mins, setMins, etaActive, setEtaActive, onApply, onClear, loading, summary }) {
+function EtaBar({ origin, setOrigin, hours, setHours, mins, setMins, etaActive, setEtaActive, onApply, onClear, loading, summary, candidateCount, hardCap }) {
+  const tooMany = candidateCount > hardCap;
   return (
     <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl border hairline" style={{ background: "rgba(44,74,62,0.04)" }}>
       <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1 shrink-0">출발지 ETA</span>
@@ -1119,8 +1221,8 @@ function EtaBar({ origin, setOrigin, hours, setHours, mins, setMins, etaActive, 
         className="text-sm bg-[color:var(--paper)] border hairline rounded-md w-14 px-2 py-1.5 num text-right outline-none focus:border-stone-900"
       />
       <span className="text-[11px] text-stone-500">분</span>
-      <button onClick={onApply} disabled={loading || !origin.trim()} className="btn btn-primary">
-        {loading ? "계산 중…" : "ETA 적용"}
+      <button onClick={onApply} disabled={loading || !origin.trim() || candidateCount === 0} className="btn btn-primary">
+        {loading ? "계산 중…" : `ETA 적용 (${candidateCount}곳)`}
       </button>
       {etaActive && (
         <button onClick={onClear} className="btn">해제</button>
@@ -1129,7 +1231,12 @@ function EtaBar({ origin, setOrigin, hours, setHours, mins, setMins, etaActive, 
         <input type="checkbox" checked={etaActive} onChange={(e) => setEtaActive(e.target.checked)} className="accent-stone-700" />
         시간 내만
       </label>
-      {summary && (
+      {tooMany && (
+        <span className="text-[11px] num" style={{ color: "var(--ember)" }} title="필터로 좁힌 뒤 다시 시도하세요">
+          ⚠ {candidateCount}곳 — 먼저 지역/컨셉 필터로 {hardCap}곳 이하로 좁히세요
+        </span>
+      )}
+      {summary && !tooMany && (
         <span className="text-[11px] text-stone-500 ml-auto num">
           {summary.within_count}/{summary.checked} <span className="text-stone-400">접근가능</span>
         </span>
@@ -1201,9 +1308,70 @@ function App() {
   const [etaLoading, setEtaLoading] = useState(false);
   const etaAbortRef = useRef(null);
 
+  // Hard ceiling on the number of camps to ETA-check in one shot. With every
+  // road call costing ~1-3s through etago and concurrency capped at 4, going
+  // past ~300 candidates is what made the 1,656-camp blanket request feel
+  // hung. The user is expected to narrow with filters first; the warning
+  // below makes that explicit when the candidate set is still too large.
+  const ETA_HARD_CAP = 300;
+
+  // List of camps that ETA SHOULD run against — every active filter
+  // applied EXCEPT the ETA layer itself. Defined before applyEta and
+  // visibleRows so both can read it; the candidate set is what the user
+  // already narrowed via region/concept/has_*/terrain/collection chips.
+  const preEtaRows = useMemo(() => {
+    let out = rows;
+    if (filters.has_valley) out = out.filter(r => r.has_valley);
+    if (filters.has_kids) out = out.filter(r => r.has_kids);
+    if (filters.has_trampoline) out = out.filter(r => r.has_trampoline);
+    if (filters.region.size > 1) out = out.filter(r => filters.region.has(r.sido));
+    if (filters.terrain.size > 0) {
+      out = out.filter(r => {
+        const set = new Set(r.location_types || []);
+        for (const t of filters.terrain) if (!set.has(t)) return false;
+        return true;
+      });
+    }
+    if (filters.facilityRaw.size > 0) {
+      out = out.filter(r => {
+        const fac = new Set(r.facilities || []);
+        for (const f of filters.facilityRaw) if (!fac.has(f)) return false;
+        return true;
+      });
+    }
+    if (filters.collection.size > 0) {
+      out = out.filter(r => {
+        const set = new Set(r.categories || []);
+        for (const c of filters.collection) if (!set.has(c)) return false;
+        return true;
+      });
+    }
+    if (filters.management.size > 0 && managementCampLevels) {
+      out = out.filter(r => {
+        const lvl = managementCampLevels.get(r.id);
+        return lvl != null && filters.management.has(lvl);
+      });
+    }
+    return out;
+  }, [rows, filters, managementCampLevels]);
+
   const applyEta = useCallback(async () => {
-    if (!origin.trim() || rows.length === 0) return;
+    if (!origin.trim() || preEtaRows.length === 0) return;
     if (etaAbortRef.current) etaAbortRef.current.abort();
+
+    // Restrict to camps that have coordinates — Haversine pre-filter on the
+    // server can't admit/reject rows without lat/lon, so we just don't ask.
+    const candidates = preEtaRows.filter(r => r.lat != null && r.lon != null);
+
+    if (candidates.length > ETA_HARD_CAP) {
+      const proceed = confirm(
+        `${candidates.length}개 캠프에 ETA 계산을 시도합니다 (캠프당 ~1–3초). ` +
+        `시간이 오래 걸릴 수 있습니다. 먼저 지역/컨셉 필터로 ${ETA_HARD_CAP}개 이하로 줄이시면 빠릅니다.\n\n` +
+        `그래도 진행하시겠습니까?`
+      );
+      if (!proceed) return;
+    }
+
     const ctrl = new AbortController();
     etaAbortRef.current = ctrl;
     const max = minutesFrom(etaHours, etaMins) || null;
@@ -1211,7 +1379,7 @@ function App() {
     try {
       const res = await fetchEtaBatch({
         origin: origin.trim(),
-        ids: rows.map(r => r.id),
+        ids: candidates.map(r => r.id),
         max_minutes: max,
         signal: ctrl.signal,
       });
@@ -1226,82 +1394,25 @@ function App() {
     } finally {
       setEtaLoading(false);
     }
-  }, [origin, etaHours, etaMins, rows]);
+  }, [origin, etaHours, etaMins, preEtaRows]);
 
   const clearEta = useCallback(() => {
     setEtaMap(null); setEtaSummary(null);
     fetch(`${API}/eta/cache`, { method: "DELETE" }).catch(() => {});
   }, []);
 
-  // Apply client-side filters. The /sites response already carries
-  // has_valley/has_kids/has_trampoline as _camp_to_fe_row-derived booleans,
-  // location_types/facilities/categories as raw arrays, so we filter
-  // locally for dimensions that aren't indexed on the server. Concept-shape
-  // filters (view/facility/kidsFacility/...) are AND'd by the backend via
-  // repeated `?concept=<id>` params (see useSites).
+  // visibleRows = preEtaRows + ETA layer (when applied & active).
+  // All non-ETA client-side filters live in `preEtaRows` so applyEta can
+  // reuse the exact same candidate set; this block only adds the ETA cut.
   const visibleRows = useMemo(() => {
-    let out = rows;
-    if (filters.has_valley) out = out.filter(r => r.has_valley);
-    if (filters.has_kids) out = out.filter(r => r.has_kids);
-    if (filters.has_trampoline) out = out.filter(r => r.has_trampoline);
-
-    // Region — when 2+ selected, the server param was dropped (single-value
-    // backend), so OR-filter by sido here. Single-region case is fully
-    // server-side and needs no extra work.
-    if (filters.region.size > 1) {
-      out = out.filter(r => filters.region.has(r.sido));
-    }
-
-    // Terrain — every selected location_type must be present (AND).
-    if (filters.terrain.size > 0) {
-      out = out.filter(r => {
-        const lt = new Set(r.location_types || []);
-        for (const t of filters.terrain) if (!lt.has(t)) return false;
-        return true;
-      });
-    }
-
-    // Facility raw codes — AND across selections (where 트램펄린 lives).
-    if (filters.facilityRaw.size > 0) {
-      out = out.filter(r => {
-        const fac = new Set(r.facilities || []);
-        for (const f of filters.facilityRaw) if (!fac.has(f)) return false;
-        return true;
-      });
-    }
-
-    // Collection — AND across selected 콜렉션:*/테마:* tags.
-    if (filters.collection.size > 0) {
-      out = out.filter(r => {
-        const cats = new Set(r.categories || []);
-        for (const c of filters.collection) if (!cats.has(c)) return false;
-        return true;
-      });
-    }
-
-    // Management — only camps that appear in /marks/management/camps with a
-    // matching level (OR across selected levels).
-    if (filters.management.size > 0 && managementCampLevels) {
-      out = out.filter(r => {
-        const lvl = managementCampLevels.get(r.id);
-        return lvl != null && filters.management.has(lvl);
-      });
-    }
-
     if (etaMap && etaActive) {
-      out = out.filter(r => {
+      return preEtaRows.filter(r => {
         const e = etaMap[r.id];
         return e && e.within;
       });
     }
-    return out;
-  }, [
-    rows,
-    filters.has_valley, filters.has_kids, filters.has_trampoline,
-    filters.region, filters.terrain, filters.facilityRaw,
-    filters.collection, filters.management,
-    managementCampLevels, etaMap, etaActive,
-  ]);
+    return preEtaRows;
+  }, [preEtaRows, etaMap, etaActive]);
 
   const focused = useMemo(() => visibleRows.find(r => r.id === pickedId) || null, [visibleRows, pickedId]);
 
@@ -1405,6 +1516,8 @@ function App() {
             etaActive={etaActive} setEtaActive={setEtaActive}
             onApply={applyEta} onClear={clearEta}
             loading={etaLoading} summary={etaSummary}
+            candidateCount={preEtaRows.filter(r => r.lat != null && r.lon != null).length}
+            hardCap={ETA_HARD_CAP}
           />
         </div>
       </header>
