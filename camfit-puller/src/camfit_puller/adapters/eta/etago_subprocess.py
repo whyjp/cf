@@ -61,6 +61,17 @@ class EtagoSubprocessProvider:
     def drive_eta(self, origin: str, dest: str, *, timeout_s: float = 12.0) -> EtaResult:
         return asyncio.run(self._fetch_one(origin, dest, timeout_s))
 
+    # Chunking knobs — etago is fast at fanning N goroutines per process,
+    # but a single Go-process serializes some bookkeeping (NDJSON write,
+    # stdin scanner, signal handling). Splitting a large batch into K
+    # parallel subprocesses raises the effective in-flight count to
+    # K × workers without hitting any single process's GC/scheduling
+    # ceiling. K=4 with workers=8 → 32 concurrent external requests, well
+    # below per-IP rate-limit thresholds for Naver/Kakao but enough to
+    # saturate typical broadband.
+    chunk_size: int = 100
+    parallel_chunks: int = 4
+
     def drive_eta_batch(
         self,
         origin: str,
@@ -69,14 +80,15 @@ class EtagoSubprocessProvider:
         concurrency: int = 4,
         timeout_s: float = 12.0,
     ) -> dict[str, EtaResult]:
-        """Resolve N (camp_id, place) pairs through ONE etago subprocess.
+        """Resolve N (camp_id, place) pairs across K parallel etago subprocesses.
 
-        Previously this method spawned a fresh subprocess per pair (asyncio
-        gather + semaphore), which paid the Go-binary process-spawn cost
-        (~100-300ms each on Windows) for every camp. The Go binary now has
-        a `--batch` mode that fans queries out across `workers` goroutines
-        inside a single process, so ~1,000 pairs is one spawn instead of
-        1,000.
+        Layered parallelism — Python side spawns up to `parallel_chunks`
+        subprocesses concurrently via asyncio.gather; each subprocess
+        runs `--batch --workers concurrency` so it fans `concurrency`
+        goroutines internally. Effective in-flight HTTP request count is
+        ≈ parallel_chunks × concurrency. With the defaults that's 32, well
+        below per-IP rate-limit thresholds for Naver/Kakao but enough to
+        saturate typical broadband.
 
         Stdin format: TSV `origin\\tdest` per line.
         Stdout: NDJSON `{"start","end","duration_min"|"error","source"}`
@@ -85,14 +97,45 @@ class EtagoSubprocessProvider:
         pairs = list(dests)
         if not pairs:
             return {}
-
-        # Total wall-clock budget: per-call timeout × pair count, capped to
-        # 10 minutes so a runaway batch doesn't hang the request.
-        total_timeout_s = min(600.0, timeout_s + max(60.0, len(pairs) * 0.4))
-        return asyncio.run(self._spawn_drive_batch(
+        # Total wall-clock budget: per-call timeout × per-chunk size,
+        # capped at 10 minutes so a runaway batch doesn't hang the request.
+        chunk_total_timeout_s = min(
+            600.0, timeout_s + max(60.0, self.chunk_size * 0.4),
+        )
+        return asyncio.run(self._drive_eta_batch_chunked(
             origin, pairs, concurrency=concurrency,
-            per_timeout_s=timeout_s, total_timeout_s=total_timeout_s,
+            per_timeout_s=timeout_s, total_timeout_s=chunk_total_timeout_s,
         ))
+
+    async def _drive_eta_batch_chunked(
+        self, origin: str, pairs: list[tuple[str, str]], *,
+        concurrency: int, per_timeout_s: float, total_timeout_s: float,
+    ) -> dict[str, EtaResult]:
+        # Split into roughly-equal chunks of at most `chunk_size`. With
+        # chunk_size=100 the parallelism kicks in past 100 pairs; smaller
+        # batches stay in a single subprocess (no overhead).
+        cs = max(1, self.chunk_size)
+        chunks = [pairs[i:i + cs] for i in range(0, len(pairs), cs)]
+        # Cap concurrent subprocesses to parallel_chunks. asyncio.Semaphore
+        # gates the gather — chunks beyond the cap wait for a free slot.
+        sem = asyncio.Semaphore(max(1, self.parallel_chunks))
+
+        async def _run_one(chunk: list[tuple[str, str]]) -> dict[str, EtaResult]:
+            async with sem:
+                return await self._spawn_drive_batch(
+                    origin, chunk,
+                    concurrency=concurrency,
+                    per_timeout_s=per_timeout_s,
+                    total_timeout_s=total_timeout_s,
+                )
+
+        # asyncio.gather fans out the chunks; each yields a dict, which
+        # we flatten into one combined result map.
+        partial = await asyncio.gather(*(_run_one(c) for c in chunks))
+        merged: dict[str, EtaResult] = {}
+        for piece in partial:
+            merged.update(piece)
+        return merged
 
     async def _spawn_drive_batch(
         self, origin: str, pairs: list[tuple[str, str]], *,
