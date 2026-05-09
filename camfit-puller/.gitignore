@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Derived crawl data (preserved as JSONL in cf-data/ per cf-crawl spec).
+# These files are reproducible from scripts/ — don't commit (size + churn).
+data/*.csv
+data/*.json
+data/*.html
+data/*.jsonl
+data/details/
+data/reviews/
+data/themes/
+data/api_*.url.txt
+data/cf_one_detail_inspect/
+data/region_inspect/
+data/search_inspect/
+data/thankqcamping_inspect/
+!data/.gitkeep
+
+# Build artifacts
+*.swp
+.DS_Store
+.coverage
