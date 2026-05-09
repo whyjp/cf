@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>camfit-puller — 캠핑장 지도</title>
+
+<!-- Pretendard 한글 -->
+<link rel="stylesheet" as="style" crossorigin
+  href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+
+<!-- Tailwind utility (CDN, prototype-grade) -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<!-- React + Babel (UMD prototype) -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+  :root {
+    --moss: #2c4a3e;
+    --moss-deep: #1a2f26;
+    --moss-soft: #cfdcc9;
+    --bark: #6b4f2c;
+    --paper: #f4f1e8;
+    --paper-2: #ebe5d2;
+    --ink: #1a1a17;
+    --ember: #c8553d;
+  }
+  html, body { height: 100%; }
+  body {
+    font-family: "Pretendard Variable", Pretendard, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    background:
+      radial-gradient(1200px 800px at 80% -20%, rgba(44,74,62,0.08), transparent 70%),
+      repeating-linear-gradient(135deg, transparent 0 28px, rgba(44,74,62,0.045) 28px 29px),
+      var(--paper);
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+  .topo {
+    /* topographic-feeling SVG background */
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='560' height='560'><g fill='none' stroke='%232c4a3e' stroke-opacity='0.08' stroke-width='0.8'><path d='M0,300 C100,250 200,360 300,300 S500,250 600,300'/><path d='M-30,330 C100,280 200,390 300,330 S500,280 600,330'/><path d='M-30,360 C100,310 200,420 300,360 S500,310 600,360'/><path d='M-30,260 C100,210 200,320 300,260 S500,210 600,260'/><path d='M-30,200 C100,150 200,260 300,200 S500,150 600,200'/></g></svg>");
+    background-size: 560px 560px;
+  }
+  .display { font-feature-settings: "ss01","tnum"; letter-spacing: -0.02em; }
+  .hairline { border-color: rgba(26,26,23,0.12); }
+  .chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 500;
+    background: rgba(44,74,62,0.08); color: var(--moss-deep);
+    border: 1px solid rgba(44,74,62,0.14);
+  }
+  .chip.warm { background: rgba(200,85,61,0.08); color: var(--ember); border-color: rgba(200,85,61,0.18); }
+  .chip.bark { background: rgba(107,79,44,0.08); color: var(--bark); border-color: rgba(107,79,44,0.2); }
+  .btn {
+    border: 1px solid rgba(26,26,23,0.18); background: var(--paper); color: var(--ink);
+    padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    transition: all 0.15s ease;
+  }
+  .btn:hover { background: var(--paper-2); border-color: rgba(26,26,23,0.32); }
+  .btn-primary {
+    background: var(--moss); color: #f7f4e8; border-color: var(--moss-deep);
+  }
+  .btn-primary:hover { background: var(--moss-deep); }
+  .toggle-pill {
+    background: rgba(26,26,23,0.06); border-radius: 999px; padding: 2px;
+    display: inline-flex; gap: 2px;
+  }
+  .toggle-pill button { padding: 5px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; color: rgba(26,26,23,0.5); }
+  .toggle-pill button.active { background: var(--moss); color: #f7f4e8; }
+  .card {
+    background: var(--paper);
+    border: 1px solid rgba(26,26,23,0.10);
+    border-radius: 14px;
+    transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+  .card:hover { transform: translateY(-1px); border-color: rgba(26,26,23,0.28); box-shadow: 0 12px 28px -18px rgba(26,26,23,0.45); }
+  .num { font-variant-numeric: tabular-nums; }
+  .kbd {
+    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
+    font-size: 11px; padding: 1px 6px; border-radius: 4px;
+    background: rgba(26,26,23,0.07); border: 1px solid rgba(26,26,23,0.13);
+  }
+  .leaflet-container {
+    background: #e7e1cf;
+    font-family: inherit;
+  }
+  .pin-cluster {
+    background: var(--moss); color: #f7f4e8; border-radius: 999px;
+    width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; box-shadow: 0 2px 8px rgba(26,26,23,0.25);
+    border: 2px solid #f4f1e8;
+  }
+  .pin-cluster.lg { width: 46px; height: 46px; font-size: 14px; }
+  .pin-pin {
+    width: 14px; height: 14px; border-radius: 999px;
+    background: var(--moss); border: 2px solid #f7f4e8;
+    box-shadow: 0 1px 3px rgba(26,26,23,0.3);
+  }
+  .pin-pin.valley  { background: #2c6e7b; }
+  .pin-pin.kids    { background: #c8553d; }
+  .pin-pin.tramp   { background: var(--bark); }
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(26,26,23,0.2); border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+const API = (typeof location !== "undefined" && location.port === "8070")
+  ? ""                      // FE served by FastAPI
+  : "http://localhost:8070"; // dev: FE served separately
+
+// ─────────────────────────────────────────────────────────────
+// Hooks
+// ─────────────────────────────────────────────────────────────
+function useFacets() {
+  const [data, setData] = useState({ regions: [], categories: [], facilities: [] });
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    fetch(`${API}/facets`).then(r => r.json()).then(setData).catch(e => setErr(String(e)));
+  }, []);
+  return { data, err };
+}
+
+function useSites(filters) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (filters.region) params.set("region", filters.region);
+    if (filters.category) params.set("category", filters.category);
+    if (filters.facility) params.set("facility", filters.facility);
+    if (filters.has_valley) params.set("has_valley", "true");
+    if (filters.has_kids) params.set("has_kids", "true");
+    if (filters.has_trampoline) params.set("has_trampoline", "true");
+    setLoading(true); setErr(null);
+    fetch(`${API}/sites?${params.toString()}`)
+      .then(r => r.json())
+      .then(d => setRows(Array.isArray(d) ? d : []))
+      .catch(e => setErr(String(e)))
+      .finally(() => setLoading(false));
+  }, [filters.region, filters.category, filters.facility, filters.has_valley, filters.has_kids, filters.has_trampoline]);
+  return { rows, loading, err };
+}
+
+function useDetail(id) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!id) { setData(null); return; }
+    fetch(`${API}/sites/${id}`).then(r => r.json()).then(setData).catch(() => setData(null));
+  }, [id]);
+  return data;
+}
+
+async function fetchEtaBatch({ origin, ids, max_minutes, signal }) {
+  const r = await fetch(`${API}/eta/batch`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ origin, ids, max_minutes, concurrency: 4, timeout_s: 12 }),
+    signal,
+  });
+  if (!r.ok) throw new Error(`eta/batch ${r.status}`);
+  return r.json();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Visual atoms
+// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Featured-tag registry — rich UI for known categories/facilities.
+// Anything not in this map renders as a generic dynamic chip.
+// Add new entries here when new categories deserve dedicated visual treatment.
+// ─────────────────────────────────────────────────────────────
+const FEATURED_CATEGORY = {
+  "계곡":     { axis: "valley",     icon: "🌊", tone: "" },
+  "키즈캠핑":  { axis: "kids",      icon: "🧒", tone: "warm" },
+};
+const FEATURED_FACILITY = {
+  "트램펄린":  { axis: "trampoline", icon: "🤸", tone: "bark" },
+};
+const FEATURED_NAMES = new Set([
+  ...Object.keys(FEATURED_CATEGORY),
+  ...Object.keys(FEATURED_FACILITY),
+]);
+const FEATURED_AXIS_FOR_TAG = (tag) => FEATURED_CATEGORY[tag]?.axis || FEATURED_FACILITY[tag]?.axis || null;
+
+// Stable hash → palette for dynamic tags so same tag gets same color across renders.
+const PALETTE = ["#5b6c8a", "#7c5e9a", "#3f7a6a", "#9a6e3a", "#8a5b6c", "#6a8a5b"];
+function tagHue(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return PALETTE[Math.abs(h) % PALETTE.length];
+}
+// "테마:대형견과함께" → "🎯 대형견과함께"  (and special icons for known prefixes)
+function prettyTag(name) {
+  if (typeof name !== "string") return name;
+  if (name.startsWith("테마:")) return "🎯 " + name.slice(3);
+  return name;
+}
+
+function PinDots({ row }) {
+  return (
+    <div className="flex gap-1">
+      {row.has_valley && <span title="계곡" className="pin-pin valley" />}
+      {row.has_kids && <span title="키즈캠핑" className="pin-pin kids" />}
+      {row.has_trampoline && <span title="트램펄린" className="pin-pin tramp" />}
+    </div>
+  );
+}
+
+function DynamicChip({ name, active, onClick, count }) {
+  const color = tagHue(name);
+  const label = prettyTag(name);
+  const baseStyle = {
+    background: `${color}14`,
+    color,
+    borderColor: `${color}33`,
+    boxShadow: active ? `inset 0 0 0 1.5px ${color}` : null,
+  };
+  return (
+    <button onClick={onClick} className="chip" style={baseStyle} title={count != null ? `${count}곳` : ""}>
+      {active ? "● " : ""}{label}{count != null ? <span className="opacity-60 ml-1 num">{count}</span> : null}
+    </button>
+  );
+}
+
+function EtaBadge({ minutes, within, error }) {
+  if (minutes == null && !error) return null;
+  if (error) return <span className="chip" title={error} style={{opacity:.55}}>🚗 ?</span>;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const label = h > 0 ? `${h}시 ${m}분` : `${m}분`;
+  const cls = within === false ? "chip" : "chip warm";
+  const style = within === false ? { opacity: 0.55, textDecoration: "line-through" } : null;
+  return <span className={cls} style={style}>🚗 {label}</span>;
+}
+
+function Chip({ children, tone }) {
+  const cls = tone === "warm" ? "chip warm" : tone === "bark" ? "chip bark" : "chip";
+  return <span className={cls}>{children}</span>;
+}
+
+function Stat({ label, value, sub }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[10px] uppercase tracking-[0.18em] text-stone-500 font-medium">{label}</span>
+      <span className="display num text-2xl font-semibold leading-tight">{value}</span>
+      {sub && <span className="text-[11px] text-stone-500 mt-0.5">{sub}</span>}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Map
+// ─────────────────────────────────────────────────────────────
+function MapView({ rows, onPick, focused, etaMap }) {
+  const mapRef = useRef(null);
+  const layerRef = useRef(null);
+  const mapEl = useRef(null);
+
+  useEffect(() => {
+    if (mapRef.current) return;
+    const map = L.map(mapEl.current, {
+      center: [36.5, 127.8], zoom: 7, zoomControl: true,
+      attributionControl: true, preferCanvas: true,
+    });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 18,
+    }).addTo(map);
+    mapRef.current = map;
+    layerRef.current = L.markerClusterGroup({
+      iconCreateFunction: (cluster) => {
+        const c = cluster.getChildCount();
+        const cls = c >= 50 ? "pin-cluster lg" : "pin-cluster";
+        return L.divIcon({ html: `<div class="${cls}">${c}</div>`, className: "", iconSize: null });
+      },
+      showCoverageOnHover: false,
+      spiderfyOnMaxZoom: true,
+    });
+    map.addLayer(layerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!layerRef.current) return;
+    layerRef.current.clearLayers();
+    const valid = rows.filter(r => r.lat != null && r.lon != null);
+    valid.forEach(r => {
+      const tone = r.has_valley ? "valley" : r.has_kids ? "kids" : r.has_trampoline ? "tramp" : "";
+      const m = L.marker([r.lat, r.lon], {
+        icon: L.divIcon({
+          className: "",
+          html: `<div class="pin-pin ${tone}" style="width:14px;height:14px;"></div>`,
+          iconSize: [14, 14],
+          iconAnchor: [7, 7],
+        }),
+        title: r.name,
+      });
+      m.on("click", () => onPick(r.id));
+      const eta = etaMap?.[r.id];
+      const etaLabel = eta && eta.minutes != null
+        ? `<br/><span style="opacity:.85;color:#c8553d">🚗 ${Math.floor(eta.minutes / 60)}시 ${eta.minutes % 60}분</span>`
+        : "";
+      m.bindTooltip(`<b>${r.name}</b><br/><span style="opacity:.7">${r.sido || ""} ${r.sigungu || ""}</span>${etaLabel}`,
+        { direction: "top", offset: [0, -8] });
+      layerRef.current.addLayer(m);
+    });
+    if (valid.length && !focused) {
+      const bounds = L.latLngBounds(valid.map(r => [r.lat, r.lon]));
+      mapRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 11 });
+    }
+  }, [rows, etaMap]);
+
+  useEffect(() => {
+    if (focused && focused.lat != null && focused.lon != null) {
+      mapRef.current.setView([focused.lat, focused.lon], 13, { animate: true });
+    }
+  }, [focused]);
+
+  return <div ref={mapEl} className="w-full h-full" />;
+}
+
+function MiniMap({ lat, lon, name }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current || lat == null || lon == null) return;
+    const map = L.map(ref.current, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false });
+    map.setView([lat, lon], 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 16 }).addTo(map);
+    L.marker([lat, lon], {
+      icon: L.divIcon({ html: `<div class="pin-pin" style="width:18px;height:18px;"></div>`, iconSize: [18, 18], iconAnchor: [9, 9], className: "" }),
+    }).addTo(map);
+    return () => map.remove();
+  }, [lat, lon]);
+  if (lat == null || lon == null) {
+    return <div className="text-xs text-stone-500 italic px-3 py-6 bg-stone-200/50 rounded-lg">좌표 정보가 없는 캠프입니다.</div>;
+  }
+  return <div ref={ref} className="w-full h-44 rounded-lg overflow-hidden border hairline" title={name} />;
+}
+
+// ─────────────────────────────────────────────────────────────
+// List & Filters
+// ─────────────────────────────────────────────────────────────
+function FilterBar({ filters, set, facets }) {
+  const sidoSet = useMemo(
+    () => Array.from(new Set((facets.regions || []).map(r => r.sido).filter(Boolean))).sort(),
+    [facets]
+  );
+  // Dynamic categories — exclude FEATURED ones (rendered as boolean axis chips above).
+  const dynCats = useMemo(
+    () => (facets.categories || []).filter(c => !FEATURED_NAMES.has(c.name)),
+    [facets]
+  );
+  const dynFacs = useMemo(
+    () => (facets.facilities || []).filter(f => !FEATURED_NAMES.has(f.name)),
+    [facets]
+  );
+  return (
+    <div className="space-y-3">
+      {/* Featured boolean axes — hardcoded rich UI for known categories */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">대표축</span>
+        {[
+          { k: "has_valley", label: "🌊 계곡", tone: "" },
+          { k: "has_kids", label: "🧒 키즈캠핑", tone: "warm" },
+          { k: "has_trampoline", label: "🤸 트램펄린", tone: "bark" },
+        ].map(({ k, label, tone }) => (
+          <button key={k}
+            onClick={() => set({ [k]: !filters[k] })}
+            className={`chip ${tone === "warm" ? "warm" : tone === "bark" ? "bark" : ""} ${filters[k] ? "" : "opacity-70 hover:opacity-100"}`}
+            style={filters[k] ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
+            {filters[k] ? "● " : ""}{label}
+          </button>
+        ))}
+      </div>
+
+      {/* Region — sido-level toggles (dynamic from /facets) */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500">지역</span>
+        <button
+          onClick={() => set({ region: "" })}
+          className={`chip ${!filters.region ? "" : "opacity-70 hover:opacity-100"}`}
+          style={!filters.region ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>전체</button>
+        {sidoSet.map(s => (
+          <button key={s} onClick={() => set({ region: filters.region === s ? "" : s })}
+            className={`chip ${filters.region === s ? "" : "opacity-70 hover:opacity-100"}`}
+            style={filters.region === s ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
+            {s}
+          </button>
+        ))}
+      </div>
+
+      {/* Dynamic category chips — discovered from /facets after each crawl */}
+      {dynCats.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">카테고리</span>
+          <button
+            onClick={() => set({ category: "" })}
+            className={`chip ${!filters.category ? "" : "opacity-70 hover:opacity-100"}`}
+            style={!filters.category ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>전체</button>
+          {dynCats.map(c => (
+            <DynamicChip
+              key={c.name}
+              name={c.name}
+              count={c.count}
+              active={filters.category === c.name}
+              onClick={() => set({ category: filters.category === c.name ? "" : c.name })}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Dynamic facility chips */}
+      {dynFacs.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">시설</span>
+          <button
+            onClick={() => set({ facility: "" })}
+            className={`chip ${!filters.facility ? "" : "opacity-70 hover:opacity-100"}`}
+            style={!filters.facility ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>전체</button>
+          {dynFacs.map(f => (
+            <DynamicChip
+              key={f.name}
+              name={f.name}
+              count={f.count}
+              active={filters.facility === f.name}
+              onClick={() => set({ facility: filters.facility === f.name ? "" : f.name })}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CampList({ rows, onPick, selectedId, etaMap, onUseAsOrigin }) {
+  return (
+    <div className="grid gap-2">
+      {rows.map(r => {
+        const eta = etaMap?.[r.id];
+        return (
+          <div key={r.id}
+            onClick={() => onPick(r.id)}
+            className={`card text-left p-3 cursor-pointer ${selectedId === r.id ? "border-stone-900" : ""}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] text-stone-500 num flex items-center gap-2">
+                  <span>{r.sido || "—"} {r.sigungu || ""}</span>
+                  {onUseAsOrigin && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onUseAsOrigin(r); }}
+                      className="text-[10px] text-stone-500 hover:text-stone-900 underline-offset-2 hover:underline"
+                      title="이 캠프를 출발지로">
+                      ⤴ 출발지
+                    </button>
+                  )}
+                </div>
+                <div className="font-semibold leading-snug truncate">{r.name}</div>
+                <div className="mt-1.5 flex flex-wrap gap-1 items-center">
+                  {r.has_valley && <Chip>🌊 계곡</Chip>}
+                  {r.has_kids && <Chip tone="warm">🧒 키즈</Chip>}
+                  {r.has_trampoline && <Chip tone="bark">🤸 트램펄린</Chip>}
+                  {/* Dynamic categories not already covered by featured axes */}
+                  {(r.categories || [])
+                    .filter(n => !FEATURED_NAMES.has(n))
+                    .slice(0, 4)
+                    .map(n => (
+                      <span key={"c-" + n} className="chip"
+                        style={{ background: tagHue(n) + "14", color: tagHue(n), borderColor: tagHue(n) + "33" }}>
+                        {prettyTag(n)}
+                      </span>
+                    ))}
+                  {(r.categories || []).filter(n => !FEATURED_NAMES.has(n)).length > 4 && (
+                    <span className="text-[10px] text-stone-500">+{(r.categories || []).filter(n => !FEATURED_NAMES.has(n)).length - 4}</span>
+                  )}
+                  {!((r.has_valley || r.has_kids || r.has_trampoline) || (r.categories || []).length) && (
+                    <span className="text-[11px] text-stone-400">—</span>
+                  )}
+                  {eta && <EtaBadge minutes={eta.minutes} within={eta.within} error={eta.error} />}
+                </div>
+              </div>
+              <PinDots row={r} />
+            </div>
+          </div>
+        );
+      })}
+      {rows.length === 0 && (
+        <div className="text-sm text-stone-500 px-1 py-4">조건에 맞는 캠프가 없습니다.</div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Detail panel
+// ─────────────────────────────────────────────────────────────
+function DetailPanel({ id, onClose, onSetOrigin, eta }) {
+  const data = useDetail(id);
+  if (!id) return null;
+  if (!data) return (
+    <div className="fixed inset-y-0 right-0 w-[420px] bg-stone-50 border-l hairline shadow-xl p-6 z-[1100] overflow-auto">
+      <button onClick={onClose} className="btn">닫기</button>
+      <div className="mt-6 text-stone-500">불러오는 중…</div>
+    </div>
+  );
+  const cats = data.categories || [];
+  const facs = data.facilities || [];
+  return (
+    <div className="fixed inset-y-0 right-0 w-[420px] bg-[color:var(--paper)] border-l hairline shadow-2xl z-[1100] overflow-auto topo">
+      <div className="p-5 border-b hairline flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500">상세</span>
+        <button onClick={onClose} className="btn">×</button>
+      </div>
+      <div className="p-5 space-y-5">
+        <div>
+          <div className="text-[11px] num text-stone-500">{data.region_sido || "—"} {data.region_sigungu || ""}</div>
+          <h2 className="display text-2xl font-bold leading-tight">{data.name || "(이름 미상)"}</h2>
+          {data.address && <div className="text-xs text-stone-600 mt-1">{data.address}</div>}
+          {eta && eta.minutes != null && (
+            <div className="mt-2"><EtaBadge minutes={eta.minutes} within={eta.within} error={eta.error} /></div>
+          )}
+          {onSetOrigin && (
+            <button
+              onClick={() => onSetOrigin(data)}
+              className="btn mt-3 text-[11px]"
+              title="이 캠프를 ETA 출발지로 설정">
+              ⤴ 이 위치를 ETA 출발지로
+            </button>
+          )}
+        </div>
+        <MiniMap lat={data.lat} lon={data.lon} name={data.name} />
+        <div className="grid grid-cols-3 gap-3">
+          <Stat label="가격" value={data.priceStartFrom ? data.priceStartFrom.toLocaleString() + "~" : "—"} sub={data.priceEndTo ? data.priceEndTo.toLocaleString() : null} />
+          <Stat label="리뷰" value={data.numOfReviews ? data.numOfReviews.toLocaleString() : "—"} />
+          <Stat label="북마크" value={data.bookmarkCount ? data.bookmarkCount.toLocaleString() : "—"} />
+        </div>
+        {data.brief && (
+          <div className="text-[13px] text-stone-700 italic border-l-2 pl-3 hairline">
+            {data.brief}
+          </div>
+        )}
+        {data.locationBrief && (
+          <div className="text-[12px] text-stone-600">📍 {data.locationBrief}</div>
+        )}
+        {(data.priceStartFrom || data.priceEndTo) && (
+          <div className="text-[13px] num">
+            <span className="text-stone-500">가격</span>{" "}
+            <span className="font-semibold">
+              {data.priceStartFrom ? data.priceStartFrom.toLocaleString() : "?"}원~
+              {data.priceEndTo ? ` ${data.priceEndTo.toLocaleString()}원` : ""}
+            </span>
+          </div>
+        )}
+        {data.numOfReviews ? (
+          <div className="text-[12px] text-stone-600">
+            ⭐ <span className="num font-semibold">{data.numOfReviews}</span> 리뷰
+            {data.bookmarkCount ? <span className="ml-2">🔖 {data.bookmarkCount.toLocaleString()}</span> : null}
+          </div>
+        ) : null}
+        {data.photos && data.photos.length > 0 && (
+          <div className="grid grid-cols-3 gap-1.5">
+            {data.photos.slice(0, 6).map((p, i) => (
+              <a key={i} href={p.url} target="_blank" rel="noopener noreferrer"
+                 className="block aspect-square overflow-hidden rounded-md border hairline">
+                <img src={p.thumb} alt="" className="w-full h-full object-cover" loading="lazy" />
+              </a>
+            ))}
+          </div>
+        )}
+        {cats.length > 0 && (
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-2">카테고리</div>
+            <div className="flex flex-wrap gap-1.5">
+              {cats.map(c =>
+                FEATURED_NAMES.has(c)
+                  ? <Chip key={c} tone={FEATURED_CATEGORY[c]?.tone || ""}>{(FEATURED_CATEGORY[c]?.icon || "")} {c}</Chip>
+                  : <span key={c} className="chip" style={{ background: tagHue(c) + "14", color: tagHue(c), borderColor: tagHue(c) + "33" }}>{prettyTag(c)}</span>
+              )}
+            </div>
+          </div>
+        )}
+        {facs.length > 0 && (
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-2">시설 ({facs.length})</div>
+            <div className="flex flex-wrap gap-1.5">
+              {facs.slice(0, 30).map(f =>
+                f === "trampoline"
+                  ? <Chip key={f} tone="bark">🤸 {f}</Chip>
+                  : <span key={f} className="chip" style={{ background: tagHue(f) + "14", color: tagHue(f), borderColor: tagHue(f) + "33" }}>{f}</span>
+              )}
+            </div>
+          </div>
+        )}
+        {data.hashtags && data.hashtags.length > 0 && (
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-2">해시태그</div>
+            <div className="flex flex-wrap gap-1">
+              {data.hashtags.slice(0, 14).map(h => (
+                <span key={h} className="text-[11px] text-stone-600">#{h}</span>
+              ))}
+              {data.hashtags.length > 14 && <span className="text-[11px] text-stone-400">+{data.hashtags.length - 14}</span>}
+            </div>
+          </div>
+        )}
+        {data.description && (
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-2">소개</div>
+            <div className="text-[12.5px] leading-relaxed text-stone-700 max-h-64 overflow-y-auto whitespace-pre-line border hairline rounded-md p-3 bg-[color:var(--paper)]">
+              {data.description}
+            </div>
+          </div>
+        )}
+        {data.reviews_top && data.reviews_top.length > 0 && (
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-2">
+              리뷰 미리보기 {data.reviews_total ? `· 전체 ${data.reviews_total.toLocaleString()}` : ""}
+            </div>
+            <div className="space-y-2">
+              {data.reviews_top.map((rv, i) => (
+                <div key={i} className="border hairline rounded-md p-2.5 text-[12px] bg-[color:var(--paper)]">
+                  <div className="flex items-center gap-2 text-[10px] text-stone-500 mb-1.5">
+                    <span className="font-semibold text-stone-700">{rv.user}</span>
+                    {rv.season && <span>· {rv.season}</span>}
+                    {rv.userType && <span>· {rv.userType}</span>}
+                    {rv.numOfDays && <span>· {rv.numOfDays}박</span>}
+                    {rv.score != null && <span className="num ml-auto">⭐ {rv.score}</span>}
+                  </div>
+                  <div className="text-stone-700 leading-relaxed line-clamp-5 whitespace-pre-line">
+                    {rv.text.length > 320 ? rv.text.slice(0, 320) + "…" : rv.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {data.contact && (
+          <div className="text-[12px] text-stone-600">📞 {data.contact}</div>
+        )}
+        {data.url && (
+          <a href={data.url} target="_blank" rel="noopener noreferrer" className="btn btn-primary inline-block">camfit 원본 열기 ↗</a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Root
+// ─────────────────────────────────────────────────────────────
+function EtaBar({ origin, setOrigin, hours, setHours, mins, setMins, etaActive, setEtaActive, onApply, onClear, loading, summary }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl border hairline" style={{ background: "rgba(44,74,62,0.04)" }}>
+      <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1 shrink-0">출발지 ETA</span>
+      <input
+        value={origin}
+        onChange={(e) => setOrigin(e.target.value)}
+        placeholder="예: 강남역, 서울역, 수원시청"
+        className="text-sm bg-[color:var(--paper)] border hairline rounded-md px-2.5 py-1.5 outline-none focus:border-stone-900 min-w-[180px] flex-1 max-w-[260px]"
+      />
+      <span className="text-[10px] text-stone-500">최대</span>
+      <input
+        type="number" min="0" max="23"
+        value={hours}
+        onChange={(e) => setHours(Math.max(0, Math.min(23, parseInt(e.target.value || "0", 10))))}
+        className="text-sm bg-[color:var(--paper)] border hairline rounded-md w-14 px-2 py-1.5 num text-right outline-none focus:border-stone-900"
+      />
+      <span className="text-[11px] text-stone-500">시</span>
+      <input
+        type="number" min="0" max="59" step="5"
+        value={mins}
+        onChange={(e) => setMins(Math.max(0, Math.min(59, parseInt(e.target.value || "0", 10))))}
+        className="text-sm bg-[color:var(--paper)] border hairline rounded-md w-14 px-2 py-1.5 num text-right outline-none focus:border-stone-900"
+      />
+      <span className="text-[11px] text-stone-500">분</span>
+      <button onClick={onApply} disabled={loading || !origin.trim()} className="btn btn-primary">
+        {loading ? "계산 중…" : "ETA 적용"}
+      </button>
+      {etaActive && (
+        <button onClick={onClear} className="btn">해제</button>
+      )}
+      <label className="flex items-center gap-1.5 ml-1 text-[11px] text-stone-600 cursor-pointer select-none" title="시간 초과 캠프를 숨기기">
+        <input type="checkbox" checked={etaActive} onChange={(e) => setEtaActive(e.target.checked)} className="accent-stone-700" />
+        시간 내만
+      </label>
+      {summary && (
+        <span className="text-[11px] text-stone-500 ml-auto num">
+          {summary.within_count}/{summary.checked} <span className="text-stone-400">접근가능</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function minutesFrom(h, m) { return Math.max(0, (h | 0) * 60 + (m | 0)); }
+
+function App() {
+  const [view, setView] = useState("split"); // split | map | list
+  const [filters, setFilters] = useState({ region: "", category: "", facility: "", has_valley: false, has_kids: false, has_trampoline: false });
+  const [pickedId, setPickedId] = useState(null);
+  const setF = useCallback((patch) => setFilters(prev => ({ ...prev, ...patch })), []);
+  const { data: facets, err: facetsErr } = useFacets();
+  const { rows, loading, err } = useSites(filters);
+
+  // ETA state
+  const [origin, setOrigin] = useState("");
+  const [etaHours, setEtaHours] = useState(2);
+  const [etaMins, setEtaMins] = useState(0);
+  const [etaMap, setEtaMap] = useState(null);   // { camp_id: {minutes, within, source, error} }
+  const [etaActive, setEtaActive] = useState(true);   // hide-out-of-range when true
+  const [etaSummary, setEtaSummary] = useState(null);
+  const [etaLoading, setEtaLoading] = useState(false);
+  const etaAbortRef = useRef(null);
+
+  const applyEta = useCallback(async () => {
+    if (!origin.trim() || rows.length === 0) return;
+    if (etaAbortRef.current) etaAbortRef.current.abort();
+    const ctrl = new AbortController();
+    etaAbortRef.current = ctrl;
+    const max = minutesFrom(etaHours, etaMins) || null;
+    setEtaLoading(true);
+    try {
+      const res = await fetchEtaBatch({
+        origin: origin.trim(),
+        ids: rows.map(r => r.id),
+        max_minutes: max,
+        signal: ctrl.signal,
+      });
+      const m = {};
+      for (const it of res.results) m[it.id] = it;
+      setEtaMap(m);
+      setEtaSummary({ within_count: res.within_count, checked: res.checked });
+    } catch (e) {
+      if (e.name !== "AbortError") {
+        alert(`ETA 적용 실패: ${e.message}`);
+      }
+    } finally {
+      setEtaLoading(false);
+    }
+  }, [origin, etaHours, etaMins, rows]);
+
+  const clearEta = useCallback(() => {
+    setEtaMap(null); setEtaSummary(null);
+    fetch(`${API}/eta/cache`, { method: "DELETE" }).catch(() => {});
+  }, []);
+
+  // Apply ETA filter on top of API rows.
+  const visibleRows = useMemo(() => {
+    if (!etaMap || !etaActive) return rows;
+    return rows.filter(r => {
+      const e = etaMap[r.id];
+      return e && e.within;
+    });
+  }, [rows, etaMap, etaActive]);
+
+  const focused = useMemo(() => visibleRows.find(r => r.id === pickedId) || null, [visibleRows, pickedId]);
+
+  const total = visibleRows.length;
+  const withCoord = visibleRows.filter(r => r.lat != null && r.lon != null).length;
+  const counts = useMemo(() => ({
+    valley: visibleRows.filter(r => r.has_valley).length,
+    kids: visibleRows.filter(r => r.has_kids).length,
+    tramp: visibleRows.filter(r => r.has_trampoline).length,
+  }), [visibleRows]);
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      {/* Header */}
+      <header className="topo border-b hairline">
+        <div className="max-w-[1500px] mx-auto px-6 py-5 flex items-end justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-3">
+              <svg width="34" height="34" viewBox="0 0 40 40" className="opacity-90">
+                <path d="M3 32 L20 6 L37 32 Z" fill="none" stroke="#2c4a3e" strokeWidth="2" strokeLinejoin="round"/>
+                <path d="M11 32 L20 18 L29 32 Z" fill="#2c4a3e"/>
+                <circle cx="32" cy="11" r="2.5" fill="#c8553d"/>
+              </svg>
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.3em] text-stone-500 font-medium">camfit-puller</div>
+                <h1 className="display text-2xl font-bold leading-none mt-0.5">한국 캠핑장 지도</h1>
+              </div>
+            </div>
+          </div>
+          <div className="hidden md:flex gap-8 items-end">
+            <Stat label="총" value={total.toLocaleString()} sub="필터 적용 후" />
+            <Stat label="좌표" value={`${withCoord}`} sub={total ? `${Math.round(withCoord/total*100)}%` : "—"} />
+            <Stat label="계곡 / 키즈 / 트램펄린" value={`${counts.valley} / ${counts.kids} / ${counts.tramp}`} />
+            <div className="toggle-pill">
+              <button className={view === "split" ? "active" : ""} onClick={() => setView("split")}>분할</button>
+              <button className={view === "map" ? "active" : ""} onClick={() => setView("map")}>지도</button>
+              <button className={view === "list" ? "active" : ""} onClick={() => setView("list")}>리스트</button>
+            </div>
+            <a href="/graph.html" className="btn">그래프 →</a>
+          </div>
+        </div>
+        <div className="max-w-[1500px] mx-auto px-6 pb-4 space-y-3">
+          <FilterBar filters={filters} set={setF} facets={facets} />
+          <EtaBar
+            origin={origin} setOrigin={setOrigin}
+            hours={etaHours} setHours={setEtaHours}
+            mins={etaMins} setMins={setEtaMins}
+            etaActive={etaActive} setEtaActive={setEtaActive}
+            onApply={applyEta} onClear={clearEta}
+            loading={etaLoading} summary={etaSummary}
+          />
+        </div>
+      </header>
+
+      {/* Main */}
+      <main className="flex-1 max-w-[1500px] w-full mx-auto px-6 py-5 grid gap-5"
+        style={{
+          gridTemplateColumns: view === "split" ? "minmax(340px, 420px) 1fr" : "1fr",
+        }}>
+        {(view === "split" || view === "list") && (
+          <section className="min-h-0">
+            {loading && <div className="text-xs text-stone-500 mb-2">불러오는 중…</div>}
+            {err && <div className="text-xs text-[color:var(--ember)] mb-2">API 연결 실패: {err}</div>}
+            <CampList
+              rows={visibleRows}
+              onPick={setPickedId}
+              selectedId={pickedId}
+              etaMap={etaMap}
+              onUseAsOrigin={(r) => {
+                const place = [r.sido, r.sigungu, r.name].filter(Boolean).join(" ");
+                setOrigin(place);
+              }}
+            />
+          </section>
+        )}
+        {(view === "split" || view === "map") && (
+          <section className="card overflow-hidden" style={{ height: "calc(100vh - 280px)", minHeight: 420 }}>
+            <MapView rows={visibleRows} onPick={setPickedId} focused={focused} etaMap={etaMap} />
+          </section>
+        )}
+      </main>
+
+      <footer className="border-t hairline text-[11px] text-stone-500 px-6 py-3 flex items-center justify-between">
+        <span>지도 © OpenStreetMap contributors · 데이터: camfit-puller crawl</span>
+        <span className="num">단축키: <span className="kbd">esc</span> 패널 닫기</span>
+      </footer>
+
+      <DetailPanel
+        id={pickedId}
+        onClose={() => setPickedId(null)}
+        eta={pickedId && etaMap ? etaMap[pickedId] : null}
+        onSetOrigin={(d) => {
+          const place = [d.region_sido, d.region_sigungu, d.name].filter(Boolean).join(" ") || d.address || d.name;
+          setOrigin(place);
+        }}
+      />
+    </div>
+  );
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    const ev = new CustomEvent("camfit:close-detail");
+    window.dispatchEvent(ev);
+  }
+});
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
