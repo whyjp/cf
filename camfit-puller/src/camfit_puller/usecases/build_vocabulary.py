@@ -53,9 +53,15 @@ class BuildVocabulary:
             )
             n += 1
         # 2) Auto-derived from camp hashtags + facilities
-        # Track both id slugs and names to avoid UNIQUE(name) collisions with seeds.
+        # Pre-load existing concept ids and names from PG. Without this, a
+        # hashtag iteration could try to INSERT a row whose name collides
+        # with a previously-persisted concept (different id) and the
+        # `ON CONFLICT (id)` clause would not catch it — UNIQUE(name) raises.
         seen: set[str] = set(seed_ids)
         seen_names: set[str] = set(seed_names)
+        for existing in self.concept_repo.all():
+            seen.add(existing.id)
+            seen_names.add(existing.name)
         for camp in self.camp_reader.iter_all():
             for h in camp.hashtags:
                 slug = "h_" + _slug(h)

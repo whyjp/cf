@@ -122,53 +122,58 @@ def pipeline_geocode(
     ``--no-self-heal`` if you ever need to debug a specific persisted coord.
     """
     c = _container()
-    pool = c._pg
     if reset_all:
-        with pool.conn() as conn, conn.cursor() as cur:
-            cur.execute("UPDATE camps SET lat=NULL, lon=NULL, geocoded_at=NULL")
-            console.print(f"[geocode] reset-all: NULLed {cur.rowcount} camps.lat/lon")
-        n = c.geocode_cache.clear()
-        console.print(f"[geocode] reset-all: cleared {n} geocode-cache entries")
+        _geocode_reset_all(c)
     elif self_heal:
-        # Coord is "coarse" iff ≥3 camps share it — admin-region centroid
-        # signature. Threshold of 3 keeps legitimate coincidences (twin
-        # campsites at the same lot, clustered properties) safe.
-        # We NULL camps AND drop the matching geocode-cache rows so the
-        # next pass re-queries upstream instead of replaying the bad coord.
-        # Single statement: dupes CTE is materialized before the UPDATE
-        # NULLs the rows out from under it, so the cache DELETE still has
-        # the coord pairs to match against.
-        with pool.conn() as conn, conn.cursor() as cur:
-            cur.execute("""
-                WITH dupes AS (
-                  SELECT lat, lon FROM camps
-                  WHERE lat IS NOT NULL AND lon IS NOT NULL
-                  GROUP BY lat, lon HAVING count(*) >= 3
-                ),
-                nulled AS (
-                  UPDATE camps c SET lat=NULL, lon=NULL, geocoded_at=NULL
-                  FROM dupes d
-                  WHERE c.lat = d.lat AND c.lon = d.lon
-                  RETURNING c.id
-                ),
-                purged AS (
-                  DELETE FROM geocodes g
-                  USING dupes d
-                  WHERE g.lat = d.lat AND g.lon = d.lon
-                  RETURNING g.query
-                )
-                SELECT (SELECT count(*) FROM nulled),
-                       (SELECT count(*) FROM dupes),
-                       (SELECT count(*) FROM purged)
-            """)
-            row = cur.fetchone()
-            n_camps, n_clusters, n_cache = row or (0, 0, 0)
-        if n_camps:
-            console.print(f"[geocode] self-heal: NULLed {n_camps} camps "
-                          f"({n_clusters} cluster centers) + dropped {n_cache} stale cache rows")
+        _geocode_self_heal(c)
     out = c.geocode_pending().execute(workers=max(1, workers))
     console.print(f"[geocode] provider={c.settings.geocoder} {out}")
     c.close()
+
+
+def _geocode_reset_all(c: "Container") -> None:
+    pool = c._pg
+    with pool.conn() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE camps SET lat=NULL, lon=NULL, geocoded_at=NULL")
+        console.print(f"[geocode] reset-all: NULLed {cur.rowcount} camps.lat/lon")
+    n = c.geocode_cache.clear()
+    console.print(f"[geocode] reset-all: cleared {n} geocode-cache entries")
+
+
+def _geocode_self_heal(c: "Container") -> None:
+    """NULL camps.lat/lon for coords shared by ≥3 camps (admin centroid pollution),
+    drop the matching geocode-cache rows so the next pass re-resolves cleanly.
+    Idempotent: once data is clean, the dupes CTE returns 0 and this is a no-op.
+    """
+    pool = c._pg
+    with pool.conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            WITH dupes AS (
+              SELECT lat, lon FROM camps
+              WHERE lat IS NOT NULL AND lon IS NOT NULL
+              GROUP BY lat, lon HAVING count(*) >= 3
+            ),
+            nulled AS (
+              UPDATE camps c SET lat=NULL, lon=NULL, geocoded_at=NULL
+              FROM dupes d
+              WHERE c.lat = d.lat AND c.lon = d.lon
+              RETURNING c.id
+            ),
+            purged AS (
+              DELETE FROM geocodes g
+              USING dupes d
+              WHERE g.lat = d.lat AND g.lon = d.lon
+              RETURNING g.query
+            )
+            SELECT (SELECT count(*) FROM nulled),
+                   (SELECT count(*) FROM dupes),
+                   (SELECT count(*) FROM purged)
+        """)
+        row = cur.fetchone()
+        n_camps, n_clusters, n_cache = row or (0, 0, 0)
+    if n_camps:
+        console.print(f"[geocode] self-heal: NULLed {n_camps} camps "
+                      f"({n_clusters} cluster centers) + dropped {n_cache} stale cache rows")
 
 
 @pipeline_app.command("vocab")
@@ -270,9 +275,16 @@ def pipeline_run_all(
     accept a worker count (themes/marks/rebuild-graph/refresh-agg) ignore it.
     """
     geocode_workers = min(workers, 4)  # respect Nominatim 1 rps
+
+    def _run_geocode_stage(c: "Container") -> dict:
+        # Self-heal first (idempotent — no-op once data is clean), then
+        # resolve any pending coords. Same path as `pipeline geocode`.
+        _geocode_self_heal(c)
+        return c.geocode_pending().execute(workers=geocode_workers)
+
     stages = [
         ("ingest",         lambda c: c.ingest_snapshot().execute()),
-        ("geocode",        lambda c: c.geocode_pending().execute(workers=geocode_workers)),
+        ("geocode",        _run_geocode_stage),
         ("vocab",          lambda c: c.build_vocabulary().execute()),
         ("embed",          lambda c: c.build_embeddings().execute()),
         ("extract-filter", lambda c: c.extract_filter_signals().execute(workers=workers)),
