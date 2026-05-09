@@ -104,6 +104,7 @@ def upgrade() -> None:
     op.create_table("concepts",
         sa.Column("id", sa.Text, primary_key=True),
         sa.Column("name", sa.Text, unique=True, nullable=False),
+        sa.Column("source", sa.Text, nullable=False, server_default="manual"),
         sa.Column("category", sa.Text), sa.Column("description", sa.Text),
         sa.Column("is_axis", sa.Boolean, server_default="false"),
     )
