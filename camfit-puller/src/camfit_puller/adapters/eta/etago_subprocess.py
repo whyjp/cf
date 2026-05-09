@@ -69,15 +69,99 @@ class EtagoSubprocessProvider:
         concurrency: int = 4,
         timeout_s: float = 12.0,
     ) -> dict[str, EtaResult]:
-        async def _run() -> dict[str, EtaResult]:
-            sem = asyncio.Semaphore(max(1, concurrency))
-            out: dict[str, EtaResult] = {}
+        """Resolve N (camp_id, place) pairs through ONE etago subprocess.
 
-            async def one(id_: str, place: str) -> None:
-                async with sem:
-                    out[id_] = await self._fetch_one(origin, place, timeout_s)
+        Previously this method spawned a fresh subprocess per pair (asyncio
+        gather + semaphore), which paid the Go-binary process-spawn cost
+        (~100-300ms each on Windows) for every camp. The Go binary now has
+        a `--batch` mode that fans queries out across `workers` goroutines
+        inside a single process, so ~1,000 pairs is one spawn instead of
+        1,000.
 
-            await asyncio.gather(*(one(i, p) for i, p in dests))
-            return out
+        Stdin format: TSV `origin\\tdest` per line.
+        Stdout: NDJSON `{"start","end","duration_min"|"error","source"}`
+        in input order. We zip the NDJSON back to the input id list.
+        """
+        pairs = list(dests)
+        if not pairs:
+            return {}
 
-        return asyncio.run(_run())
+        # Total wall-clock budget: per-call timeout × pair count, capped to
+        # 10 minutes so a runaway batch doesn't hang the request.
+        total_timeout_s = min(600.0, timeout_s + max(60.0, len(pairs) * 0.4))
+        return asyncio.run(self._spawn_drive_batch(
+            origin, pairs, concurrency=concurrency,
+            per_timeout_s=timeout_s, total_timeout_s=total_timeout_s,
+        ))
+
+    async def _spawn_drive_batch(
+        self, origin: str, pairs: list[tuple[str, str]], *,
+        concurrency: int, per_timeout_s: float, total_timeout_s: float,
+    ) -> dict[str, EtaResult]:
+        cmd = [
+            self.bin_path, "--batch", "--json",
+            "--workers", str(max(1, concurrency)),
+            "--per-timeout", f"{int(per_timeout_s)}s",
+            "--timeout", f"{int(total_timeout_s)}s",
+        ]
+        # Build stdin payload — every line is `origin<TAB>dest`. The
+        # camp_id-to-place mapping is preserved by line-order: line N maps
+        # to pairs[N], so output line N maps back to pairs[N][0].
+        stdin_payload = "\n".join(
+            f"{origin}\t{dest}" for _id, dest in pairs
+        ).encode("utf-8") + b"\n"
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except (FileNotFoundError, PermissionError) as e:
+            err = f"spawn: {e}"
+            return {pid: EtaResult(origin=origin, dest=dest, minutes=None, error=err)
+                    for pid, dest in pairs}
+
+        try:
+            stdout, _stderr = await asyncio.wait_for(
+                proc.communicate(input=stdin_payload),
+                timeout=total_timeout_s + 5,
+            )
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            err = f"timeout after {total_timeout_s:.0f}s"
+            return {pid: EtaResult(origin=origin, dest=dest, minutes=None, error=err)
+                    for pid, dest in pairs}
+
+        # NDJSON one record per input line. Exit 3 = no successes; we still
+        # parse stdout because every line carries either duration or error.
+        lines = [ln for ln in stdout.decode("utf-8", errors="replace").splitlines() if ln.strip()]
+        out: dict[str, EtaResult] = {}
+        for (pid, dest), line in zip(pairs, lines):
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                out[pid] = EtaResult(origin=origin, dest=dest, minutes=None, error="parse")
+                continue
+            if "duration_min" in payload:
+                out[pid] = EtaResult(
+                    origin=str(payload.get("start", origin)),
+                    dest=str(payload.get("end", dest)),
+                    minutes=int(payload["duration_min"]),
+                    source=payload.get("source"),
+                )
+            else:
+                out[pid] = EtaResult(
+                    origin=origin, dest=dest, minutes=None,
+                    error=str(payload.get("error", "unknown"))[:200],
+                )
+        # Stragglers — if the binary printed fewer lines than inputs (rare;
+        # only on protocol failure), tag the rest as error so the caller
+        # always gets one entry per input id.
+        for pid, dest in pairs[len(lines):]:
+            out[pid] = EtaResult(origin=origin, dest=dest, minutes=None, error="missing")
+        return out

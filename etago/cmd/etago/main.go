@@ -95,6 +95,16 @@ func run(argv []string, stdout, stderr *os.File) (code int) {
 		return runGeocode(ctx, fs.Arg(0), *source, *ua, *asJSON, *verbose, client, stdout, stderr)
 	}
 
+	if *batch {
+		// --batch (without --geocode): drive-ETA batch. Stdin format =
+		// one "origin\tdest" pair per line; output = NDJSON per pair, in
+		// input order. Eliminates the per-pair process-spawn cost — one
+		// subprocess fans N requests out internally.
+		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+		defer cancel()
+		return runDriveBatch(ctx, *source, *ua, *workers, *perTimeout, *verbose, client, os.Stdin, stdout, stderr)
+	}
+
 	if fs.NArg() != 2 {
 		printUsage(stderr)
 		return 2
@@ -337,6 +347,133 @@ func runGeocodeBatch(
 
 	if len(queries) == 0 {
 		// Nothing to do is success — caller asked us to process zero items.
+		return 0
+	}
+	if anyOK == 1 {
+		return 0
+	}
+	return 3
+}
+
+// runDriveBatch reads "origin\tdest" pairs from stdin (one per line), drives
+// each through the same provider chain runDrive uses, and emits NDJSON in
+// input order. Eliminates the per-pair process-spawn cost — one subprocess
+// runs N requests in parallel via `workers` goroutines.
+//
+// Per-line output shape:
+//
+//	success: {"start":"…","end":"…","duration_min":N,"source":"naver|kakao|osrm"}
+//	failure: {"start":"…","end":"…","error":"<short reason>"}
+//
+// Exit 0 if any line succeeded; exit 3 only when every line failed AND we
+// read at least one line.
+func runDriveBatch(
+	ctx context.Context,
+	source, ua string,
+	workers int,
+	perTimeout time.Duration,
+	verbose bool,
+	client *http.Client,
+	stdinR io.Reader,
+	stdout, stderr io.Writer,
+) int {
+	providers, err := buildProviders(source, ua, client)
+	if err != nil {
+		fmt.Fprintf(stderr, "etago: %v\n", err)
+		return 2
+	}
+	if workers < 1 {
+		workers = 1
+	}
+
+	type pair struct {
+		Origin string
+		Dest   string
+	}
+	scanner := bufio.NewScanner(stdinR)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var pairs []pair
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Tab-separated origin\tdest. Lines without exactly one tab → error
+		// record so caller can pair input N with output N by ordinal.
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 {
+			pairs = append(pairs, pair{
+				Origin: strings.TrimSpace(parts[0]),
+				Dest:   strings.TrimSpace(parts[1]),
+			})
+		} else {
+			pairs = append(pairs, pair{Origin: strings.TrimSpace(line), Dest: ""})
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(stderr, "etago: stdin read: %v\n", err)
+		return 2
+	}
+
+	type record struct {
+		Start       string `json:"start"`
+		End         string `json:"end"`
+		DurationMin int    `json:"duration_min,omitempty"`
+		Source      string `json:"source,omitempty"`
+		Error       string `json:"error,omitempty"`
+	}
+	results := make([]record, len(pairs))
+
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	var anyOK int32
+	var okMu sync.Mutex
+	startedAt := time.Now()
+
+	for i, p := range pairs {
+		i, p := i, p
+		if p.Origin == "" || p.Dest == "" {
+			results[i] = record{Start: p.Origin, End: p.Dest, Error: "empty"}
+			continue
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			itemCtx, cancel := context.WithTimeout(ctx, perTimeout)
+			defer cancel()
+
+			in, err := parse.NormalizeInputs(p.Origin, p.Dest)
+			if err != nil {
+				results[i] = record{Start: p.Origin, End: p.Dest, Error: shortErr(err.Error())}
+				return
+			}
+			d, err := route.GetDuration(itemCtx, in, providers)
+			if err != nil {
+				results[i] = record{Start: p.Origin, End: p.Dest, Error: shortErr(err.Error())}
+				return
+			}
+			results[i] = record{
+				Start: p.Origin, End: p.Dest,
+				DurationMin: d.Min,
+				Source:      d.Source,
+			}
+			okMu.Lock()
+			anyOK = 1
+			okMu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	enc := json.NewEncoder(stdout)
+	for _, r := range results {
+		_ = enc.Encode(r)
+	}
+	if verbose {
+		fmt.Fprintf(stderr, "[drive-batch] %d pairs, %dms total\n",
+			len(pairs), time.Since(startedAt).Milliseconds())
+	}
+
+	if len(pairs) == 0 {
 		return 0
 	}
 	if anyOK == 1 {
