@@ -143,14 +143,13 @@ def pipeline_extract_desc(
 
 
 @pipeline_app.command("extract-review")
-def pipeline_extract_review():
+def pipeline_extract_review(
+    workers: int = typer.Option(8, "--workers", "-w",
+                                help="Parallel workers (≤ PG pool max=8)."),
+):
     """ExtractReviewSignals — temperature-weighted negation-aware over each camp's reviews."""
     c = _container()
-    uc = c.extract_review_signals()
-    total = 0
-    for camp in c.camps_read.iter_all():
-        n = uc.execute(camp.id)
-        total += n
+    total = _extract_review_all(c, workers=workers)
     console.print(f"[extract-review] {total} signals across all camps")
     c.close()
 
@@ -192,16 +191,25 @@ def pipeline_rebuild_graph():
 
 
 @pipeline_app.command("run-all")
-def pipeline_run_all():
-    """Full pipeline in order: ingest → geocode → vocab → embed → 3×extract → refresh-agg → themes → rebuild-graph."""
+def pipeline_run_all(
+    workers: int = typer.Option(8, "--workers", "-w",
+                                help="Parallel workers for I/O-bound stages "
+                                     "(extract-review, geocode). Capped at PG pool max=8."),
+):
+    """Full pipeline: ingest → geocode → vocab → embed → 3×extract → refresh-agg → themes → marks → rebuild-graph.
+
+    `--workers N` propagates to the parallelizable stages. Stages that don't
+    accept a worker count (themes/marks/rebuild-graph/refresh-agg) ignore it.
+    """
+    geocode_workers = min(workers, 4)  # respect Nominatim 1 rps
     stages = [
         ("ingest",         lambda c: c.ingest_snapshot().execute()),
-        ("geocode",        lambda c: c.geocode_pending().execute()),
+        ("geocode",        lambda c: c.geocode_pending().execute(workers=geocode_workers)),
         ("vocab",          lambda c: c.build_vocabulary().execute()),
         ("embed",          lambda c: c.build_embeddings().execute()),
-        ("extract-filter", lambda c: c.extract_filter_signals().execute()),
+        ("extract-filter", lambda c: c.extract_filter_signals().execute(workers=workers)),
         ("extract-desc",   lambda c: c.extract_desc_signals().execute()),
-        ("extract-review", lambda c: _extract_review_all(c)),
+        ("extract-review", lambda c: _extract_review_all(c, workers=workers)),
         ("refresh-agg",    lambda c: (c.refresh_aggregated().execute() or "ok")),
         ("themes",         lambda c: c.discover_themes().execute()),
         ("marks",          lambda c: c.compute_marks().execute()),
@@ -217,11 +225,27 @@ def pipeline_run_all():
         c.close()
 
 
-def _extract_review_all(c: Container) -> int:
+def _extract_review_all(c: Container, *, workers: int = 8) -> int:
+    """Run ExtractReviewSignals across every camp.
+
+    Each camp_id is processed in its own thread; the use-case grabs a fresh PG
+    connection from the pool per call (writers/readers acquire on every method).
+    `iter_all()` yields each camp_id exactly once, so reset_for + upsert is
+    race-free across workers.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    workers = max(1, min(workers, 8))
     uc = c.extract_review_signals()
+    camp_ids = [camp.id for camp in c.camps_read.iter_all()]
+    if not camp_ids:
+        return 0
+    if workers == 1:
+        return sum(uc.execute(cid) for cid in camp_ids)
     total = 0
-    for camp in c.camps_read.iter_all():
-        total += uc.execute(camp.id)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(uc.execute, cid) for cid in camp_ids]
+        for f in as_completed(futs):
+            total += f.result()
     return total
 
 

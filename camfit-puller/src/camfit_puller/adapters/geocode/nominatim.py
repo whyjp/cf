@@ -5,6 +5,7 @@ the *adapter's* responsibility — wrap with CachedGeocoder to avoid repeated ca
 for the same address.
 """
 from __future__ import annotations
+import threading
 import time
 from typing import Optional
 
@@ -28,13 +29,19 @@ class NominatimGeocoder:
         self._timeout = timeout_s
         self._rate_limit_s = rate_limit_s
         self._last_call = 0.0
+        # Lock the rate-limit gate so multiple threads can safely call lookup()
+        # without violating Nominatim's 1 req/sec policy.  Only the gate is
+        # held during sleep — the HTTP request itself runs unlocked, but the
+        # gate ensures requests are spaced ≥ rate_limit_s apart.
+        self._gate = threading.Lock()
         self._client = httpx.Client(timeout=timeout_s, follow_redirects=True)
 
     def _wait_rate_limit(self) -> None:
-        elapsed = time.monotonic() - self._last_call
-        if elapsed < self._rate_limit_s:
-            time.sleep(self._rate_limit_s - elapsed)
-        self._last_call = time.monotonic()
+        with self._gate:
+            elapsed = time.monotonic() - self._last_call
+            if elapsed < self._rate_limit_s:
+                time.sleep(self._rate_limit_s - elapsed)
+            self._last_call = time.monotonic()
 
     def lookup(self, address: str, *, hint: str | None = None) -> Optional[GeoPoint]:
         if not address:
