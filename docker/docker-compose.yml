@@ -20,23 +20,6 @@ services:
       timeout: 3s
       retries: 12
 
-  rocksdb:
-    build: ./rocksdb
-    container_name: camfit-rocksdb
-    restart: unless-stopped
-    ports:
-      - "8071:8071"
-    volumes:
-      - rocks_data:/data
-    environment:
-      ROCKS_DATA: /data
-    networks: [camfit_net]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8071/healthz', timeout=2).read()"]
-      interval: 10s
-      timeout: 3s
-      retries: 6
-
   postgres:
     image: pgvector/pgvector:pg16
     container_name: camfit-postgres
@@ -59,7 +42,6 @@ services:
 
 volumes:
   falkor_data:
-  rocks_data:
   pg_data:
 
 networks:

@@ -8,8 +8,7 @@ Endpoints:
 
 Sources:
     - Primary list: FalkorDB (Cypher) for filterable graph queries.
-    - Detail/raw row fetch: RocksDB HTTP service (camp:{id}).
-    - Both degrade gracefully — if Falkor down, list returns []; if Rocks down, detail returns metadata-only from KG.
+    - Detail: FalkorDB KG only (RocksDB removed in T36; full PG migration in T37).
 """
 from __future__ import annotations
 
@@ -17,7 +16,6 @@ import os
 from pathlib import Path
 from typing import Optional
 
-import httpx
 from falkordb import FalkorDB
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,7 +29,6 @@ from .etago_adapter import EtagoClient, EtagoUnavailable
 FALKOR_HOST = os.environ.get("FALKOR_HOST", "localhost")
 FALKOR_PORT = int(os.environ.get("FALKOR_PORT", "6379"))
 FALKOR_GRAPH = os.environ.get("FALKOR_GRAPH", "camfit")
-ROCKS_BASE = os.environ.get("ROCKS_BASE", "http://localhost:8071")
 FE_DIR = os.environ.get("CAMFIT_FE_DIR", str(Path(__file__).resolve().parents[3] / "fe"))
 
 
@@ -65,17 +62,10 @@ def _get_etago() -> EtagoClient:
 
 @app.get("/healthz")
 def healthz() -> dict:
-    status = {"falkor": "down", "rocks": "down", "etago": "down"}
+    status = {"falkor": "down", "etago": "down"}
     try:
         _falkor().query("RETURN 1")
         status["falkor"] = "up"
-    except Exception:
-        pass
-    try:
-        with httpx.Client(timeout=2.0) as c:
-            r = c.get(f"{ROCKS_BASE}/healthz")
-            if r.status_code == 200:
-                status["rocks"] = "up"
     except Exception:
         pass
     try:
@@ -204,54 +194,44 @@ def sites(
 
 @app.get("/sites/{site_id}")
 def site_detail(site_id: str) -> dict:
-    """Merged detail: rocks `camp:{id}` summary + `detail:{id}` full + `reviews:{id}` top-N.
+    """Camp detail from FalkorDB KG.
 
     Response shape:
-        { ...summary fields..., detail: {...} | null, reviews: {top: [...], total: N} | null }
+        { ...summary fields..., detail: null, reviews: null }
+
+    # T37: TODO migrate to GetSiteDetail use-case (PG-backed detail + reviews).
+    # RocksDB was removed in T36. detail/reviews fields are null until T37 wires PG.
     """
     summary: dict | None = None
     detail: dict | None = None
     reviews: dict | None = None
 
-    try:
-        with httpx.Client(timeout=4.0) as c:
-            r = c.get(f"{ROCKS_BASE}/kv/camp:{site_id}")
-            if r.status_code == 200:
-                summary = r.json()
-            r = c.get(f"{ROCKS_BASE}/kv/detail:{site_id}")
-            if r.status_code == 200:
-                detail = r.json()
-            r = c.get(f"{ROCKS_BASE}/kv/reviews:{site_id}")
-            if r.status_code == 200:
-                reviews = r.json()
-    except Exception:
-        pass
+    # T37: TODO fetch detail and reviews from PG (GetSiteDetail use-case).
 
-    if summary is None:
-        # KG fallback for the summary if rocks down.
-        try:
-            rs = _falkor().query(
-                "MATCH (c:Camp {id: $id})-[:LOCATED_IN]->(r:Region) "
-                "OPTIONAL MATCH (c)-[:HAS_CATEGORY]->(cat:Category) "
-                "OPTIONAL MATCH (c)-[:HAS_FACILITY]->(f:Facility) "
-                "RETURN c.id, c.name, c.lat, c.lon, c.url, r.sido, r.sigungu, "
-                "       collect(DISTINCT cat.name), collect(DISTINCT f.name)",
-                params={"id": site_id},
-            ).result_set
-            if not rs:
-                raise HTTPException(404, f"camp {site_id} not found")
-            row = rs[0]
-            summary = {
-                "id": row[0], "name": row[1], "lat": row[2], "lon": row[3], "url": row[4],
-                "region_sido": row[5], "region_sigungu": row[6],
-                "categories": [c for c in row[7] if c],
-                "facilities": [f for f in row[8] if f],
-                "_source": "kg-only",
-            }
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(503, f"both rocks and falkor unavailable: {e}")
+    # KG lookup for summary.
+    try:
+        rs = _falkor().query(
+            "MATCH (c:Camp {id: $id})-[:LOCATED_IN]->(r:Region) "
+            "OPTIONAL MATCH (c)-[:HAS_CATEGORY]->(cat:Category) "
+            "OPTIONAL MATCH (c)-[:HAS_FACILITY]->(f:Facility) "
+            "RETURN c.id, c.name, c.lat, c.lon, c.url, r.sido, r.sigungu, "
+            "       collect(DISTINCT cat.name), collect(DISTINCT f.name)",
+            params={"id": site_id},
+        ).result_set
+        if not rs:
+            raise HTTPException(404, f"camp {site_id} not found")
+        row = rs[0]
+        summary = {
+            "id": row[0], "name": row[1], "lat": row[2], "lon": row[3], "url": row[4],
+            "region_sido": row[5], "region_sigungu": row[6],
+            "categories": [c for c in row[7] if c],
+            "facilities": [f for f in row[8] if f],
+            "_source": "kg-only",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, f"falkor unavailable: {e}")
 
     enriched = dict(summary)
     if detail:
@@ -337,40 +317,28 @@ def _place_for_camp(payload: dict) -> str:
 
 
 def _camp_lookup(ids: list[str]) -> dict[str, dict]:
-    """Resolve camp ids → row payload via Rocks (preferred) or Falkor fallback."""
+    """Resolve camp ids → row payload via FalkorDB KG.
+
+    # T37: TODO enrich with PG row-store data (GetSiteDetail use-case).
+    """
     out: dict[str, dict] = {}
-    # Rocks-backed (preferred).
     try:
-        with httpx.Client(timeout=4.0) as c:
-            for cid in ids:
-                try:
-                    r = c.get(f"{ROCKS_BASE}/kv/camp:{cid}")
-                    if r.status_code == 200:
-                        out[cid] = r.json()
-                except Exception:
-                    continue
+        g = _falkor()
+        for cid in ids:
+            rs = g.query(
+                "MATCH (c:Camp {id: $id})-[:LOCATED_IN]->(r:Region) "
+                "RETURN c.id, c.name, r.sido, r.sigungu, c.address, c.lat, c.lon",
+                params={"id": cid},
+            ).result_set
+            if rs:
+                row = rs[0]
+                out[cid] = {
+                    "id": row[0], "name": row[1],
+                    "region_sido": row[2], "region_sigungu": row[3],
+                    "address": row[4], "lat": row[5], "lon": row[6],
+                }
     except Exception:
         pass
-    # KG fallback for any miss.
-    missing = [c for c in ids if c not in out]
-    if missing:
-        try:
-            g = _falkor()
-            for cid in missing:
-                rs = g.query(
-                    "MATCH (c:Camp {id: $id})-[:LOCATED_IN]->(r:Region) "
-                    "RETURN c.id, c.name, r.sido, r.sigungu, c.address, c.lat, c.lon",
-                    params={"id": cid},
-                ).result_set
-                if rs:
-                    row = rs[0]
-                    out[cid] = {
-                        "id": row[0], "name": row[1],
-                        "region_sido": row[2], "region_sigungu": row[3],
-                        "address": row[4], "lat": row[5], "lon": row[6],
-                    }
-        except Exception:
-            pass
     return out
 
 

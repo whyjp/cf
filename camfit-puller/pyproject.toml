@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "camfit-puller"
 version = "0.1.0"
-description = "Polite camfit.co.kr camping list crawler with FalkorDB knowledge graph + RocksDB row store + huashu-design FE"
+description = "Polite camfit.co.kr camping list crawler with FalkorDB knowledge graph + PostgreSQL row store + huashu-design FE"
 requires-python = ">=3.11"
 authors = [{ name = "cxx_2" }]
 license = { text = "MIT" }
@@ -34,12 +34,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Headless-browser fallbacks (used only when JSON endpoint discovery fails).
-# Order of preference at runtime: lightpanda → playwright.
-lightpanda = ["websockets>=12.0"]
 playwright = ["playwright>=1.44"]
-browser = ["websockets>=12.0"]   # legacy alias = lightpanda
-dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "respx>=0.21", "websockets>=12.0"]
+dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "respx>=0.21"]
 testcontainers = ["testcontainers[postgres]>=4.7"]
 
 [project.scripts]
