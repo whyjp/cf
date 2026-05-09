@@ -375,6 +375,12 @@ function MapView({ rows, onPick, focused, etaMap, axes }) {
       },
       showCoverageOnHover: false,
       spiderfyOnMaxZoom: true,
+      // Tighter merge — default 80px clumps neighbouring camps too eagerly.
+      // 35px keeps only true overlaps merged so individual pins stay visible.
+      maxClusterRadius: 35,
+      // Past zoom 12 (city-level), drop clustering entirely. Each camp gets
+      // its own pin — useful when zooming into a popular sigungu.
+      disableClusteringAtZoom: 12,
     });
     map.addLayer(layerRef.current);
 
