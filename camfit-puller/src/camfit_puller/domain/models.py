@@ -83,7 +83,9 @@ class CampConcept(BaseModel):
     model_config = ConfigDict(extra="forbid")
     camp_id: str
     concept_id: str
-    score: float = Field(ge=-1.0, le=1.0)
+    # Aggregated weighted-sum from camp_concept_aggregated view: 1.0×filter + 0.7×review + 0.5×desc.
+    # Theoretical range [-2.2, +2.2] (all 3 sources, max signal). Sign indicates apply/negate.
+    score: float = Field(ge=-3.0, le=3.0)
 
 
 class Theme(BaseModel):
