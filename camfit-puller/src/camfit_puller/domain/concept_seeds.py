@@ -57,4 +57,15 @@ SEEDS: list[tuple[str, str, str, bool]] = [
     ("animal_petting",   "동물체험",     "kids_facility", False),
     ("kids_pool",        "키즈수영장",   "kids_facility", False),
     ("kids_toilet",      "어린이화장실", "kids_facility", False),
+    # ── D2: management (Mark axis — review-temperature driven) ─
+    # Polarity flips negative for "noisy"/"신경 안 씀" via the existing
+    # negation-aware review extractor. ComputeMarks reads these and
+    # buckets camps into bib/recommended/notable/exceptional.
+    ("mgmt_clean",       "깔끔",        "management", False),
+    ("mgmt_clean2",      "청결",        "management", False),
+    ("mgmt_pleasant",    "쾌적",        "management", False),
+    ("mgmt_managed",     "관리",        "management", False),
+    ("mgmt_neat",        "정돈",        "management", False),
+    ("mgmt_neglected",   "방치",        "management", False),
+    ("mgmt_old",         "노후",        "management", False),
 ]

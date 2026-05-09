@@ -25,13 +25,30 @@ from ..domain.models import Mark
 from ..adapters.postgres.pool import PostgresPool
 
 
-# axis -> list of concept ids that contribute to this axis
+# axis -> list of concept ids that contribute to this axis. Each axis pools
+# review-signal scores across its member concepts; quantile-bucketed into
+# bib/recommended/notable/exceptional. New axes only appear in the FE marks
+# rail once their member concepts have positive review signals (depends on
+# review coverage — surface/space/parking are review-thin, so they will
+# stay sparse until the full 1,656-camp review crawl lands).
 AXIS_CONCEPTS: dict[str, list[str]] = {
-    "kids": ["kids", "playground", "sandpit", "kids_pool", "kids_toilet"],
-    "view": ["valley", "oceanview", "riverview", "mountainview", "lakeview", "forestview"],
-    "facility": ["trampoline", "swimmingpool", "warmpool", "private_bathroom"],
-    "vibe": ["private", "stargazing"],
-    "pets": ["pets", "animal_petting"],
+    "kids":       ["kids", "playground", "sandpit", "kids_pool", "kids_toilet"],
+    "view":       ["valley", "oceanview", "riverview", "mountainview", "lakeview", "forestview"],
+    "facility":   ["trampoline", "swimmingpool", "warmpool", "private_bathroom"],
+    "vibe":       ["private", "stargazing"],
+    "pets":       ["pets", "animal_petting"],
+    # D2 management — review-temperature is the natural source. Negative
+    # tokens (방치/노후) get negative signal via negation-aware extractor.
+    "management": ["mgmt_clean", "mgmt_clean2", "mgmt_pleasant", "mgmt_managed",
+                   "mgmt_neat", "mgmt_neglected", "mgmt_old"],
+    # D1 surface, D4 space/parking — review-thin in current corpus, but
+    # the description-keyword pass writes to camp_desc_signals which feed
+    # camp_concept_aggregated. ComputeMarks itself only reads review_signals,
+    # so these will stay empty here; the FE filters them via /sites?concept=.
+    "surface":    ["surface_gravel", "surface_deck", "surface_sand",
+                   "surface_grass", "surface_woodchip", "surface_dirt"],
+    "space":      ["space_generous", "space_tight"],
+    "parking":    ["parking_on_site", "parking_adjacent", "parking_separate"],
 }
 
 _LEVELS = ["bib", "recommended", "notable", "exceptional"]
