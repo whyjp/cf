@@ -123,17 +123,20 @@ def site_detail(site_id: str) -> dict:
     geo = camp.get("geo") or {}
     region = camp.get("region") or {}
     photos = camp.get("photos") or []
+    sido = region.get("sido")
     flat = {
         "id": camp.get("id"),
         "name": camp.get("name"),
         "address": camp.get("address"),
         "lat": geo.get("lat"),
         "lon": geo.get("lon"),
-        "region_sido": region.get("sido"),
+        "region_sido": sido,
         "region_sigungu": region.get("sigungu"),
-        "categories": _project_categories(camp.get("collections"), camp.get("types")),
+        "categories": _filter_maritime_for_inland(
+            _project_categories(camp.get("collections"), camp.get("types")), sido,
+        ),
         "facilities": list(camp.get("facilities") or []) + list(camp.get("additional_facilities") or []),
-        "hashtags": camp.get("hashtags") or [],
+        "hashtags": _filter_maritime_for_inland(camp.get("hashtags") or [], sido),
         "description": camp.get("description"),
         "brief": camp.get("brief"),
         "locationBrief": camp.get("location_brief"),
@@ -174,6 +177,40 @@ _TYPE_KO = {
 }
 
 
+# Sido (광역) values that have NO coastline — every camp here is purely
+# inland. Camfit's source data sometimes tags lake-side camps as "ocean"
+# and lake-island camps as "island" (e.g. 청풍호반 오토캠핑장 in 충북
+# carries locationTypes=['lake','mountain','forest','river','ocean']).
+# We drop maritime tags for these sidos at the FE projection layer.
+_LANDLOCKED_SIDO = frozenset({
+    "충북", "충청북도",
+    "대전", "대전광역시",
+    "세종", "세종특별자치시",
+    "광주", "광주광역시",
+    "대구", "대구광역시",
+    "서울", "서울특별시",
+})
+
+# Substrings that indicate a maritime claim — collection names like
+# "콜렉션:오션뷰 캠핑장" or hashtags like "바다캠핑장" get filtered out
+# of `r.categories` when the camp's sido has no coast.
+_MARITIME_TOKENS = ("오션", "바다", "섬캠", "해변", "해안")
+
+
+def _filter_maritime_for_inland(items, sido) -> list:
+    """Drop maritime-flavoured items when the camp sits in a landlocked sido."""
+    if not items or not sido or sido not in _LANDLOCKED_SIDO:
+        return list(items or [])
+    return [s for s in items if not any(tok in s for tok in _MARITIME_TOKENS)]
+
+
+def _filter_location_types_for_inland(loc_types, sido) -> list:
+    """Drop ocean/island tags when the camp sits in a landlocked sido."""
+    if not loc_types or not sido or sido not in _LANDLOCKED_SIDO:
+        return list(loc_types or [])
+    return [t for t in loc_types if t not in ("ocean", "island")]
+
+
 def _project_categories(collections, types) -> list[str]:
     """Compose the FE-facing `categories` chip list from camp.collections +
     camp.types. Three opaque crawler-discovery prefixes are dropped:
@@ -206,11 +243,12 @@ def _camp_to_fe_row(c) -> dict:
     """
     geo = c.geo
     region = c.region
-    cats = list(c.collections or [])
+    sido = region.sido if region else None
+    cats = _filter_maritime_for_inland(c.collections or [], sido)
     facs = list(c.facilities or []) + list(c.additional_facilities or [])
     types = list(c.types or [])
-    location_types = list(c.location_types or [])
-    hashtags = list(c.hashtags or [])
+    location_types = _filter_location_types_for_inland(c.location_types or [], sido)
+    hashtags = _filter_maritime_for_inland(c.hashtags or [], sido)
 
     # Search corpus for the boolean axis flags — every meaningful tag source
     # joined into one lowercased blob for substring matching. description+
@@ -226,7 +264,7 @@ def _camp_to_fe_row(c) -> dict:
     row = {
         "id": c.id,
         "name": c.name,
-        "sido": region.sido if region else None,
+        "sido": sido,
         "sigungu": region.sigungu if region else None,
         "address": c.address,
         "lat": geo.lat if geo else None,
