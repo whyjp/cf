@@ -340,7 +340,10 @@ def axis_camps(axis: str, min_level: Optional[str] = None, limit: int = 100) -> 
 
 class EtaBatchRequest(BaseModel):
     origin: str = Field(..., min_length=1)
-    ids: list[str] = Field(..., min_length=1, max_length=500)
+    # 10k cap — the FE sends every camp in the current filtered view (1,656
+    # at full crawl, soon to grow). The eta_cache PG layer makes repeat calls
+    # cheap; concurrency caps at 12 to avoid hammering the etago subprocess.
+    ids: list[str] = Field(..., min_length=1, max_length=10000)
     max_minutes: Optional[int] = Field(None, ge=1, le=1440)
     concurrency: int = Field(4, ge=1, le=12)
     timeout_s: float = Field(12.0, ge=2.0, le=60.0)

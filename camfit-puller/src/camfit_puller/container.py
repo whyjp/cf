@@ -252,7 +252,7 @@ class Container:
         )
 
     def eta_for_fleet(self) -> EtaForFleet:
-        return EtaForFleet(self.camps_read, self.eta)
+        return EtaForFleet(self.camps_read, self.eta, geocoder=self.geocoder)
 
     def compute_marks(self) -> ComputeMarks:
         return ComputeMarks(self._pg, self.mark_repo)
