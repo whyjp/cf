@@ -58,3 +58,81 @@ def test_geocode_failed_lookup_no_write():
     assert out["resolved"] == 0
     assert out["failed"] == 1
     assert writer.geo_calls == []
+
+
+def test_geocode_uses_batch_path_when_geocoder_supports_it():
+    """When the geocoder exposes lookup_many, GeocodePending must use it
+    instead of N lookup() calls — that's the whole reason etago has a
+    batch mode (single subprocess vs spawn-per-camp)."""
+
+    class BatchGeocoder:
+        def __init__(self):
+            self.batch_calls: list[list[tuple[str, str | None]]] = []
+            self.lookup_calls = 0
+
+        def lookup(self, *_, **__):
+            self.lookup_calls += 1
+            return None  # we should never reach here
+
+        def lookup_many(self, items):
+            pairs = list(items)
+            self.batch_calls.append(pairs)
+            # Resolve every odd-indexed input, fail the rest, to verify
+            # the use-case writes only the resolved ones.
+            out = {}
+            for i, (addr, _hint) in enumerate(pairs):
+                out[addr] = GeoPoint(lat=37.0 + i * 0.1, lon=127.0 + i * 0.1) if i % 2 == 1 else None
+            return out
+
+    camps = [
+        Camp(id=f"c{i}", name=f"N{i}",
+             region=Region(sido="강원", sigungu="평창군"),
+             address=f"강원 평창군 진부면 {i}길")
+        for i in range(4)
+    ]
+    g = BatchGeocoder()
+    writer = FakeWriter()
+    out = GeocodePending(FakeReader(camps), writer, g).execute()
+
+    # One batch call, no per-item lookups.
+    assert len(g.batch_calls) == 1
+    assert g.lookup_calls == 0
+    # 4 camps; odd indexes 1 and 3 resolve; 0 and 2 fail.
+    assert out == {"attempted": 4, "resolved": 2, "failed": 2}
+    # Writer only invoked for resolved camps.
+    written_ids = sorted(c[0] for c in writer.geo_calls)
+    assert written_ids == ["c1", "c3"]
+
+
+def test_batch_path_collapses_duplicate_addresses_to_one_query_with_per_camp_writes():
+    """Two camps sharing the exact same address (e.g. '1캠핑장 / 2캠핑장') must
+    geocode in one query but each get the resolved coord written to PG."""
+
+    class BatchGeocoder:
+        def __init__(self):
+            self.last_pairs: list[tuple[str, str | None]] = []
+
+        def lookup(self, *_, **__):
+            return None
+
+        def lookup_many(self, items):
+            self.last_pairs = list(items)
+            return {addr: GeoPoint(lat=37.5, lon=128.0) for addr, _ in self.last_pairs}
+
+    camps = [
+        Camp(id="cA", name="원주두리 1캠핑장",
+             region=Region(sido="강원", sigungu="원주시"),
+             address="강원 원주시 신림면 황둔리 525"),
+        Camp(id="cB", name="원주두리 2캠핑장",
+             region=Region(sido="강원", sigungu="원주시"),
+             address="강원 원주시 신림면 황둔리 525"),
+    ]
+    g = BatchGeocoder()
+    writer = FakeWriter()
+    out = GeocodePending(FakeReader(camps), writer, g).execute()
+
+    # Single de-duplicated query upstream.
+    assert len(g.last_pairs) == 1
+    # But both camps got coords.
+    assert out == {"attempted": 2, "resolved": 2, "failed": 0}
+    assert sorted(c[0] for c in writer.geo_calls) == ["cA", "cB"]

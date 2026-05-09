@@ -68,6 +68,21 @@ func (n *NaverProvider) HasNcp() bool {
 	return n.NcpClientID != "" && n.NcpClientSecret != ""
 }
 
+// Geocode resolves a Korean address via NCP Geocoding (with the injected
+// fallback Geocoder — typically Kakao K1 — used when NCP returns no match).
+// Implements Geocoder so a NaverProvider can be passed wherever a Kakao
+// geocoder is expected. When NCP credentials are absent, it delegates
+// straight to the fallback if one is wired; otherwise returns ErrUpstreamFail.
+func (n *NaverProvider) Geocode(ctx context.Context, query string) (lat, lng float64, err error) {
+	if !n.HasNcp() {
+		if n.Geocoder != nil {
+			return n.Geocoder.Geocode(ctx, query)
+		}
+		return 0, 0, fmt.Errorf("%w: naver geocode requires NCP_CLIENT_ID/NCP_CLIENT_SECRET", ErrUpstreamFail)
+	}
+	return n.geocodeForNcp(ctx, query)
+}
+
 func (n *NaverProvider) Lookup(ctx context.Context, in parse.NormalizedInput) (Duration, error) {
 	if n.HasNcp() {
 		return n.lookupNcp(ctx, in)

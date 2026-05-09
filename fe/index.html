@@ -138,26 +138,78 @@ function useFacets() {
   return { data, err };
 }
 
+// Concept-shaped filter slots — these are unioned and sent as repeated
+// `concept=<id>` params (server-side AND). Backend matches by concept ID
+// (English, e.g. "valley", "mountainview", "swimmingpool"), NOT Korean name.
+const CONCEPT_FILTER_KEYS = [
+  "conceptAxis", "view", "facility", "kidsFacility",
+  "surface", "space", "parking", "audience", "vibe",
+];
+
+function setSerialize(set) {
+  // Stable string for useEffect dep arrays (Set identity changes every render).
+  if (!set || set.size === 0) return "";
+  return [...set].sort().join("|");
+}
+
 function useSites(filters) {
-  // Server-side params: only `region` (sido) and `concept` (single name, AND).
-  // Boolean axes (has_valley/has_kids/has_trampoline) and `collection` are
-  // applied client-side in App.visibleRows because /sites already returns
-  // those derived booleans on every row.
+  // Server-side: `region` (single sido — fall back to client-side when >1 selected)
+  // and `concept[]` (repeated, AND semantics, by concept ID).
+  // Client-side filters (terrain/collection/facilityRaw/management) live in
+  // App.visibleRows because they read columns that aren't indexed on the server.
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
+
+  const conceptKey = useMemo(
+    () => CONCEPT_FILTER_KEYS.map(k => setSerialize(filters[k])).join("/"),
+    CONCEPT_FILTER_KEYS.map(k => filters[k]) // re-key when any concept set changes
+  );
+  const regionKey = useMemo(() => setSerialize(filters.region), [filters.region]);
+
   useEffect(() => {
     const params = new URLSearchParams();
-    if (filters.region) params.set("region", filters.region);
-    if (filters.concept) params.set("concept", filters.concept);
+    // Region: only push to server when exactly one is picked. With 0 we want
+    // the unfiltered result; with >1 we'll filter client-side to OR-union.
+    if (filters.region.size === 1) {
+      const [only] = filters.region;
+      params.append("region", only);
+    }
+    // Concept-shape sets unioned → repeated concept= params (AND on backend).
+    const conceptIds = new Set();
+    for (const k of CONCEPT_FILTER_KEYS) {
+      const s = filters[k];
+      if (!s) continue;
+      for (const v of s) conceptIds.add(v);
+    }
+    for (const id of conceptIds) params.append("concept", id);
+
     setLoading(true); setErr(null);
     fetch(`${API}/sites?${params.toString()}`)
       .then(r => r.json())
       .then(d => setRows(Array.isArray(d) ? d : []))
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
-  }, [filters.region, filters.concept]);
+  }, [regionKey, conceptKey]);
   return { rows, loading, err };
+}
+
+function useManagementMarks() {
+  // One-shot fetch of all camps that have a management mark, so the FE can
+  // filter by the level (bib/recommended/notable/exceptional) without
+  // re-querying the server on every chip change.
+  const [byId, setById] = useState(null);
+  useEffect(() => {
+    fetch(`${API}/marks/management/camps?limit=2000`)
+      .then(r => r.json())
+      .then(arr => {
+        const m = new Map();
+        if (Array.isArray(arr)) for (const x of arr) m.set(x.camp_id, x.level);
+        setById(m);
+      })
+      .catch(() => setById(new Map()));
+  }, []);
+  return byId;
 }
 
 function useDetail(id) {
@@ -349,7 +401,8 @@ function MapView({ rows, onPick, focused, etaMap }) {
       const etaLabel = eta && eta.minutes != null
         ? `<br/><span style="opacity:.85;color:#c8553d">🚗 ${Math.floor(eta.minutes / 60)}시 ${eta.minutes % 60}분</span>`
         : "";
-      m.bindTooltip(`<b>${r.name}</b><br/><span style="opacity:.7">${r.sido || ""} ${r.sigungu || ""}</span>${etaLabel}`,
+      const addrLabel = r.address ? `<br/><span style="opacity:.6;font-size:10px">${r.address}</span>` : "";
+      m.bindTooltip(`<b>${r.name}</b><br/><span style="opacity:.7">${r.sido || ""} ${r.sigungu || ""}</span>${addrLabel}${etaLabel}`,
         { direction: "top", offset: [0, -8] });
       layerRef.current.addLayer(m);
     });
@@ -393,38 +446,185 @@ function MiniMap({ lat, lon, name }) {
 // ─────────────────────────────────────────────────────────────
 // List & Filters
 // ─────────────────────────────────────────────────────────────
-function FilterBar({ filters, set, facets, rows }) {
+
+// Korean labels for raw r.location_types codes
+const TERRAIN_LABEL = {
+  valley:   "🌊 계곡",
+  mountain: "🏔 산",
+  forest:   "🌲 숲",
+  flat:     "🟫 평지",
+  river:    "🏞 강",
+  ocean:    "🌊 바다",
+  lake:     "💧 호수",
+  island:   "🏝 섬",
+  etc:      "기타",
+};
+
+// Korean labels for raw r.facilities codes (camfit english slugs)
+const FACILITY_LABEL = {
+  trampoline:     "🤸 트램펄린",
+  swimmingPool:   "🏊 수영장",
+  warmpool:       "♨️ 온수풀",
+  showerRoom:     "🚿 샤워실",
+  store:          "🛒 매점",
+  playground:     "🎠 놀이터",
+  bbq:            "🍖 BBQ",
+  canBringPet:    "🐕 반려동반",
+  pet:            "🐾 펫",
+  kidsFacility:   "👶 키즈시설",
+  individualRoom: "🚪 개별룸",
+  trail:          "🥾 트레일",
+  trailer:        "🚐 트레일러",
+  caravan:        "🚚 카라반",
+  carCharger:     "🔌 EV충전",
+  garden:         "🌳 정원",
+  activity:       "🎯 액티비티",
+  rent:           "🛍 렌탈",
+  sled:           "🛷 썰매",
+  storage:        "📦 보관",
+  zoo:            "🦌 동물원",
+  sauna:          "🧖 사우나",
+  zipline:        "🪂 짚라인",
+};
+
+// Korean labels for management mark levels
+const MGMT_LEVELS = ["exceptional", "notable", "recommended", "bib"];
+const MGMT_LABEL = {
+  exceptional: "🏆 최고관리",
+  notable:     "✨ 우수관리",
+  recommended: "👍 추천관리",
+  bib:         "🎯 양호관리",
+};
+
+// Toggle a chip in a set with modifier-key semantics.
+//   - Plain click: single-replace (or clear if it was the lone selection).
+//   - Ctrl/Cmd/Shift+click: toggle membership (additive AND-mode).
+function toggleChipSelection(currentSet, value, ev) {
+  const next = new Set(currentSet);
+  const additive = ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey);
+  if (additive) {
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    return next;
+  }
+  if (next.size === 1 && next.has(value)) return new Set();
+  return new Set([value]);
+}
+
+// MultiChip — a chip whose `active` is "in this Set". onPick(value, ev) is
+// called with the raw event so the helper above can read modifier keys.
+function MultiChip({ value, label, count, active, onPick, color }) {
+  const hue = color || tagHue(value);
+  const style = {
+    background: `${hue}14`,
+    color: hue,
+    borderColor: `${hue}33`,
+    boxShadow: active ? `inset 0 0 0 1.5px ${hue}` : null,
+  };
+  return (
+    <button
+      onClick={(e) => onPick(value, e)}
+      className="chip"
+      style={style}
+      title={count != null ? `${count}곳` : ""}>
+      {active ? "● " : ""}{label}{count != null ? <span className="opacity-60 ml-1 num">{count}</span> : null}
+    </button>
+  );
+}
+
+function FilterRow({ heading, set, items, onToggle, onClear }) {
+  // items: [{ value, label, count }]; render nothing if empty
+  if (!items || items.length === 0) return null;
+  const selectedCount = set ? set.size : 0;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1 shrink-0">
+        {heading}{selectedCount >= 2 ? <span className="ml-1 text-[color:var(--ember)] num">({selectedCount})</span> : null}
+      </span>
+      {selectedCount > 0 && (
+        <button
+          onClick={(e) => { e.preventDefault(); onClear(); }}
+          className="chip"
+          style={{ background: "rgba(26,26,23,0.04)", color: "rgba(26,26,23,0.55)", borderColor: "rgba(26,26,23,0.18)" }}
+          title="이 차원 선택 해제">×</button>
+      )}
+      {items.map(it => (
+        <MultiChip
+          key={it.value}
+          value={it.value}
+          label={it.label}
+          count={it.count}
+          active={set ? set.has(it.value) : false}
+          onPick={onToggle}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCounts }) {
+  // Sido list from /facets.regions (de-duplicated)
   const sidoSet = useMemo(
     () => Array.from(new Set((facets.regions || []).map(r => r.sido).filter(Boolean))).sort(),
     [facets]
   );
 
-  // Concept axes — first-class concept-graph axes (kids/valley/pets/...).
-  // /facets returns ~6 of these; surface them as a dedicated row. Featured
-  // names (계곡/키즈캠핑/트램펄린) are stripped here because they're already
-  // covered by the boolean 대표축 row.
+  // Bucket /facets.concepts by category. Backend `concept=<id>` matches by
+  // ID (English), so keep the ID as `value` and use Korean `name` as label.
+  const conceptsByCat = useMemo(() => {
+    const buckets = {};
+    for (const c of (facets.concepts || [])) {
+      if (!c || (c.count || 0) <= 0) continue;
+      const cat = c.category || "_other";
+      if (!buckets[cat]) buckets[cat] = [];
+      buckets[cat].push({ value: c.id, label: c.name, count: c.count });
+    }
+    // Keep top 40 per bucket to avoid drowning the UI
+    for (const k of Object.keys(buckets)) {
+      buckets[k].sort((a, b) => (b.count || 0) - (a.count || 0));
+      buckets[k] = buckets[k].slice(0, 40);
+    }
+    return buckets;
+  }, [facets]);
+
+  // Concept axes (is_axis=true). Drop ones already covered by the 대표축 row
+  // (계곡/키즈캠핑) — trampoline isn't a concept axis so this is fine.
   const conceptAxes = useMemo(
-    () => (facets.concept_axes || []).filter(c => !FEATURED_NAMES.has(c.name)),
+    () => (facets.concept_axes || [])
+      .filter(c => (c.count || 0) > 0)
+      .filter(c => c.id !== "valley" && c.id !== "kids")
+      .map(c => ({ value: c.id, label: c.name, count: c.count })),
     [facets]
   );
 
-  // Long-tail concepts (hashtag/facility-derived). Filter to count>0 and
-  // top 40 by count so the UI doesn't drown in low-signal entries.
-  const conceptChips = useMemo(
-    () => (facets.concepts || [])
-      .filter(c => (c.count || 0) > 0 && !FEATURED_NAMES.has(c.name))
-      .slice(0, 40),
-    [facets]
-  );
-
-  // Collections — derived in-FE from currently-loaded rows. Camfit's
-  // `전시:E*` exhibition IDs are camp-pool catch-alls (>500 camps each, no
-  // semantic value) and the api.py projection already strips them, so we
-  // only see meaningful `콜렉션:*` (editorial buckets) and `테마:*` here.
-  const collectionChips = useMemo(() => {
-    if (!rows || rows.length === 0) return [];
+  // Terrain — aggregate r.location_types over rows (this is per-camp raw data).
+  const terrainItems = useMemo(() => {
     const counts = new Map();
-    for (const r of rows) {
+    for (const r of (rows || [])) {
+      for (const t of (r.location_types || [])) counts.set(t, (counts.get(t) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([code, count]) => ({ value: code, label: TERRAIN_LABEL[code] || code, count }));
+  }, [rows]);
+
+  // Facility (raw English codes from r.facilities) — aggregate over rows.
+  // This is where 트램펄린 lives now (camfit raw `trampoline`).
+  const facilityRawItems = useMemo(() => {
+    const counts = new Map();
+    for (const r of (rows || [])) {
+      for (const f of (r.facilities || [])) counts.set(f, (counts.get(f) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 30)
+      .map(([code, count]) => ({ value: code, label: FACILITY_LABEL[code] || code, count }));
+  }, [rows]);
+
+  // Collections — `콜렉션:*` / `테마:*` in r.categories.
+  const collectionItems = useMemo(() => {
+    const counts = new Map();
+    for (const r of (rows || [])) {
       for (const c of (r.categories || [])) {
         if (typeof c !== "string") continue;
         if (c.startsWith("콜렉션:") || c.startsWith("테마:")) {
@@ -435,12 +635,48 @@ function FilterBar({ filters, set, facets, rows }) {
     return [...counts.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 20)
-      .map(([name, count]) => ({ name, count }));
+      .map(([name, count]) => ({ value: name, label: prettyTag(name), count }));
   }, [rows]);
+
+  // Management — fixed 4 levels, counts from useMemo over the global mark map.
+  const managementItems = useMemo(
+    () => MGMT_LEVELS
+      .filter(lv => (mgmtLevelCounts?.[lv] || 0) > 0)
+      .map(lv => ({ value: lv, label: MGMT_LABEL[lv] || lv, count: mgmtLevelCounts?.[lv] || 0 })),
+    [mgmtLevelCounts]
+  );
+
+  // Toggle helper bound to a particular filter slot.
+  const makeToggle = (key) => (value, ev) =>
+    setFilters(prev => ({ ...prev, [key]: toggleChipSelection(prev[key], value, ev) }));
+  const makeClear = (key) =>
+    () => setFilters(prev => ({ ...prev, [key]: new Set() }));
+
+  // Sido row uses the multi-select helper too.
+  const regionItems = useMemo(
+    () => sidoSet.map(s => ({ value: s, label: s })),
+    [sidoSet]
+  );
+
+  // Count active dimensions for the "전체 해제" button visibility.
+  const anyActive =
+    filters.has_valley || filters.has_kids || filters.has_trampoline ||
+    filters.region.size > 0 ||
+    CONCEPT_FILTER_KEYS.some(k => (filters[k] && filters[k].size > 0)) ||
+    filters.terrain.size > 0 || filters.collection.size > 0 ||
+    filters.facilityRaw.size > 0 || filters.management.size > 0;
 
   return (
     <div className="space-y-3">
-      {/* Featured boolean axes — hardcoded rich UI for known categories */}
+      {/* Modifier-key hint + clear-all */}
+      <div className="flex items-center gap-2 text-[11px] text-stone-500">
+        <span><span className="kbd">Ctrl</span>/<span className="kbd">⌘</span> 클릭 = 다중 선택 (AND) · 다시 클릭 = 해제</span>
+        {anyActive && (
+          <button onClick={clearAll} className="btn ml-auto" style={{ padding: "3px 10px", fontSize: "11px" }}>전체 해제</button>
+        )}
+      </div>
+
+      {/* Featured boolean axes — single-toggle shortcuts (대표축). */}
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">대표축</span>
         {[
@@ -449,7 +685,7 @@ function FilterBar({ filters, set, facets, rows }) {
           { k: "has_trampoline", label: "🤸 트램펄린", tone: "bark" },
         ].map(({ k, label, tone }) => (
           <button key={k}
-            onClick={() => set({ [k]: !filters[k] })}
+            onClick={() => setFilters(prev => ({ ...prev, [k]: !prev[k] }))}
             className={`chip ${tone === "warm" ? "warm" : tone === "bark" ? "bark" : ""} ${filters[k] ? "" : "opacity-70 hover:opacity-100"}`}
             style={filters[k] ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
             {filters[k] ? "● " : ""}{label}
@@ -457,77 +693,113 @@ function FilterBar({ filters, set, facets, rows }) {
         ))}
       </div>
 
-      {/* Region — sido-level toggles (dynamic from /facets) */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500">지역</span>
-        <button
-          onClick={() => set({ region: "" })}
-          className={`chip ${!filters.region ? "" : "opacity-70 hover:opacity-100"}`}
-          style={!filters.region ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>전체</button>
-        {sidoSet.map(s => (
-          <button key={s} onClick={() => set({ region: filters.region === s ? "" : s })}
-            className={`chip ${filters.region === s ? "" : "opacity-70 hover:opacity-100"}`}
-            style={filters.region === s ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
-            {s}
-          </button>
-        ))}
-      </div>
+      {/* Region — multi-select sido */}
+      <FilterRow
+        heading="지역"
+        set={filters.region}
+        items={regionItems}
+        onToggle={makeToggle("region")}
+        onClear={makeClear("region")}
+      />
 
-      {/* Concept axes — first-class concept toggles from /facets.concept_axes */}
-      {conceptAxes.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">컨셉 축</span>
-          <button
-            onClick={() => set({ concept: "" })}
-            className={`chip ${!filters.concept ? "" : "opacity-70 hover:opacity-100"}`}
-            style={!filters.concept ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>전체</button>
-          {conceptAxes.map(ca => (
-            <DynamicChip
-              key={ca.id || ca.name}
-              name={ca.name}
-              count={ca.count}
-              active={filters.concept === ca.name}
-              onClick={() => set({ concept: filters.concept === ca.name ? "" : ca.name })}
-            />
-          ))}
-        </div>
-      )}
+      {/* ── 시멘틱 필터 — driven by /facets.concepts.category ── */}
+      <div className="text-[10px] uppercase tracking-[0.2em] text-stone-400 pt-1 border-t hairline">시멘틱 필터</div>
 
-      {/* Long-tail concepts — top 40 by count from /facets.concepts */}
-      {conceptChips.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">컨셉</span>
-          {conceptChips.map(c => (
-            <DynamicChip
-              key={c.id || c.name}
-              name={c.name}
-              count={c.count}
-              active={filters.concept === c.name}
-              onClick={() => set({ concept: filters.concept === c.name ? "" : c.name })}
-            />
-          ))}
-        </div>
-      )}
+      <FilterRow
+        heading="컨셉 축"
+        set={filters.conceptAxis}
+        items={conceptAxes}
+        onToggle={makeToggle("conceptAxis")}
+        onClear={makeClear("conceptAxis")}
+      />
+      <FilterRow
+        heading="자연뷰"
+        set={filters.view}
+        items={conceptsByCat.view || []}
+        onToggle={makeToggle("view")}
+        onClear={makeClear("view")}
+      />
+      <FilterRow
+        heading="시설"
+        set={filters.facility}
+        items={conceptsByCat.facility || []}
+        onToggle={makeToggle("facility")}
+        onClear={makeClear("facility")}
+      />
+      <FilterRow
+        heading="키즈시설"
+        set={filters.kidsFacility}
+        items={conceptsByCat.kids_facility || []}
+        onToggle={makeToggle("kidsFacility")}
+        onClear={makeClear("kidsFacility")}
+      />
+      <FilterRow
+        heading="사이트 재질"
+        set={filters.surface}
+        items={conceptsByCat.surface || []}
+        onToggle={makeToggle("surface")}
+        onClear={makeClear("surface")}
+      />
+      <FilterRow
+        heading="사이트 공간"
+        set={filters.space}
+        items={conceptsByCat.space || []}
+        onToggle={makeToggle("space")}
+        onClear={makeClear("space")}
+      />
+      <FilterRow
+        heading="주차"
+        set={filters.parking}
+        items={conceptsByCat.parking || []}
+        onToggle={makeToggle("parking")}
+        onClear={makeClear("parking")}
+      />
+      <FilterRow
+        heading="대상"
+        set={filters.audience}
+        items={conceptsByCat.audience || []}
+        onToggle={makeToggle("audience")}
+        onClear={makeClear("audience")}
+      />
+      <FilterRow
+        heading="분위기"
+        set={filters.vibe}
+        items={conceptsByCat.vibe || []}
+        onToggle={makeToggle("vibe")}
+        onClear={makeClear("vibe")}
+      />
 
-      {/* Collections — derived client-side from rows.categories prefixes */}
-      {collectionChips.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">컬렉션</span>
-          <button
-            onClick={() => set({ collection: "" })}
-            className={`chip ${!filters.collection ? "" : "opacity-70 hover:opacity-100"}`}
-            style={!filters.collection ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>전체</button>
-          {collectionChips.map(c => (
-            <DynamicChip
-              key={c.name}
-              name={c.name}
-              count={c.count}
-              active={filters.collection === c.name}
-              onClick={() => set({ collection: filters.collection === c.name ? "" : c.name })}
-            />
-          ))}
-        </div>
-      )}
+      {/* ── 직접 필터 — read raw fields off /sites rows ── */}
+      <div className="text-[10px] uppercase tracking-[0.2em] text-stone-400 pt-1 border-t hairline">직접 필터</div>
+
+      <FilterRow
+        heading="지형"
+        set={filters.terrain}
+        items={terrainItems}
+        onToggle={makeToggle("terrain")}
+        onClear={makeClear("terrain")}
+      />
+      <FilterRow
+        heading="시설(원본)"
+        set={filters.facilityRaw}
+        items={facilityRawItems}
+        onToggle={makeToggle("facilityRaw")}
+        onClear={makeClear("facilityRaw")}
+      />
+      <FilterRow
+        heading="컬렉션"
+        set={filters.collection}
+        items={collectionItems}
+        onToggle={makeToggle("collection")}
+        onClear={makeClear("collection")}
+      />
+      <FilterRow
+        heading="관리수준"
+        set={filters.management}
+        items={managementItems}
+        onToggle={makeToggle("management")}
+        onClear={makeClear("management")}
+      />
     </div>
   );
 }
@@ -629,10 +901,16 @@ function CampList({ rows, onPick, selectedId, etaMap }) {
             className={`card text-left p-3 cursor-pointer ${selectedId === r.id ? "border-stone-900" : ""}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <div className="text-[11px] text-stone-500 num">
+                <div className="text-[11px] text-stone-500 num flex items-center gap-1.5">
                   <span>{r.sido || "—"} {r.sigungu || ""}</span>
+                  {(r.lat == null || r.lon == null) && (
+                    <span title="정확한 좌표 미확인 — 지도에서 제외" className="chip" style={{padding:"0 4px",fontSize:"9px",borderColor:"#d6cfc2",color:"#9a8b6b",background:"#fdf8eb"}}>📍?</span>
+                  )}
                 </div>
                 <div className="font-semibold leading-snug truncate">{r.name}</div>
+                {r.address && (
+                  <div className="text-[11px] text-stone-500 truncate mt-0.5">{r.address}</div>
+                )}
                 <div className="mt-1.5 flex flex-wrap gap-1 items-center">
                   {r.has_valley && <Chip>🌊 계곡</Chip>}
                   {r.has_kids && <Chip tone="warm">🧒 키즈</Chip>}
@@ -864,19 +1142,49 @@ function minutesFrom(h, m) { return Math.max(0, (h | 0) * 60 + (m | 0)); }
 
 function App() {
   const [view, setView] = useState("split"); // split | map | list
-  const [filters, setFilters] = useState({
-    region: "",
-    concept: "",       // server-side filter (single name, AND)
-    collection: "",    // client-side filter (rows.categories includes it)
+  // Multi-select chip state — every dimension is a Set<string>. The boolean
+  // shortcut row (대표축) stays as 3 booleans because they're equivalent to
+  // server-side `concept=valley|kids` + `r.has_trampoline` shortcuts.
+  const [filters, setFilters] = useState(() => ({
+    region:        new Set(),       // sido values; sent server-side when size===1, else client-side
+    conceptAxis:   new Set(),       // concept ids from facets.concept_axes
+    view:          new Set(),       // facets.concepts where category='view'
+    facility:      new Set(),       // facets.concepts where category='facility'
+    kidsFacility:  new Set(),       // facets.concepts where category='kids_facility'
+    surface:       new Set(),       // facets.concepts where category='surface'
+    space:         new Set(),       // facets.concepts where category='space'
+    parking:       new Set(),       // facets.concepts where category='parking'
+    audience:      new Set(),       // facets.concepts where category='audience'
+    vibe:          new Set(),       // facets.concepts where category='vibe'
+    terrain:       new Set(),       // r.location_types codes (client-side)
+    collection:    new Set(),       // 콜렉션:* / 테마:* in r.categories (client-side)
+    facilityRaw:   new Set(),       // r.facilities raw codes (client-side, where 트램펄린 lives)
+    management:    new Set(),       // mark-axis levels — bib/recommended/notable/exceptional
     has_valley: false, has_kids: false, has_trampoline: false,
-  });
+  }));
+  const clearAll = useCallback(() => {
+    setFilters(prev => {
+      const next = { has_valley: false, has_kids: false, has_trampoline: false };
+      for (const k of Object.keys(prev)) {
+        if (prev[k] instanceof Set) next[k] = new Set();
+      }
+      return next;
+    });
+  }, []);
   const [pickedId, setPickedId] = useState(null);
   // null when search isn't active; array when it is. When set, overrides
   // the /sites result for both the list and the map.
   const [searchResults, setSearchResults] = useState(null);
-  const setF = useCallback((patch) => setFilters(prev => ({ ...prev, ...patch })), []);
   const { data: facets, err: facetsErr } = useFacets();
   const { rows: sitesRows, loading, err } = useSites(filters);
+  const managementCampLevels = useManagementMarks();
+  const mgmtLevelCounts = useMemo(() => {
+    const m = { exceptional: 0, notable: 0, recommended: 0, bib: 0 };
+    if (managementCampLevels) for (const lv of managementCampLevels.values()) {
+      if (m[lv] != null) m[lv]++;
+    }
+    return m;
+  }, [managementCampLevels]);
   // Effective rows pre-clientside-filtering: search results take priority.
   const rows = useMemo(
     () => (searchResults != null ? searchResults : sitesRows),
@@ -925,16 +1233,61 @@ function App() {
     fetch(`${API}/eta/cache`, { method: "DELETE" }).catch(() => {});
   }, []);
 
-  // Apply boolean-axis + collection + ETA filters client-side. The /sites
-  // response already carries has_valley/has_kids/has_trampoline as
-  // _camp_to_fe_row-derived booleans, so we filter locally instead of
-  // re-querying the server for each toggle.
+  // Apply client-side filters. The /sites response already carries
+  // has_valley/has_kids/has_trampoline as _camp_to_fe_row-derived booleans,
+  // location_types/facilities/categories as raw arrays, so we filter
+  // locally for dimensions that aren't indexed on the server. Concept-shape
+  // filters (view/facility/kidsFacility/...) are AND'd by the backend via
+  // repeated `?concept=<id>` params (see useSites).
   const visibleRows = useMemo(() => {
     let out = rows;
     if (filters.has_valley) out = out.filter(r => r.has_valley);
     if (filters.has_kids) out = out.filter(r => r.has_kids);
     if (filters.has_trampoline) out = out.filter(r => r.has_trampoline);
-    if (filters.collection) out = out.filter(r => (r.categories || []).includes(filters.collection));
+
+    // Region — when 2+ selected, the server param was dropped (single-value
+    // backend), so OR-filter by sido here. Single-region case is fully
+    // server-side and needs no extra work.
+    if (filters.region.size > 1) {
+      out = out.filter(r => filters.region.has(r.sido));
+    }
+
+    // Terrain — every selected location_type must be present (AND).
+    if (filters.terrain.size > 0) {
+      out = out.filter(r => {
+        const lt = new Set(r.location_types || []);
+        for (const t of filters.terrain) if (!lt.has(t)) return false;
+        return true;
+      });
+    }
+
+    // Facility raw codes — AND across selections (where 트램펄린 lives).
+    if (filters.facilityRaw.size > 0) {
+      out = out.filter(r => {
+        const fac = new Set(r.facilities || []);
+        for (const f of filters.facilityRaw) if (!fac.has(f)) return false;
+        return true;
+      });
+    }
+
+    // Collection — AND across selected 콜렉션:*/테마:* tags.
+    if (filters.collection.size > 0) {
+      out = out.filter(r => {
+        const cats = new Set(r.categories || []);
+        for (const c of filters.collection) if (!cats.has(c)) return false;
+        return true;
+      });
+    }
+
+    // Management — only camps that appear in /marks/management/camps with a
+    // matching level (OR across selected levels).
+    if (filters.management.size > 0 && managementCampLevels) {
+      out = out.filter(r => {
+        const lvl = managementCampLevels.get(r.id);
+        return lvl != null && filters.management.has(lvl);
+      });
+    }
+
     if (etaMap && etaActive) {
       out = out.filter(r => {
         const e = etaMap[r.id];
@@ -942,7 +1295,13 @@ function App() {
       });
     }
     return out;
-  }, [rows, filters.has_valley, filters.has_kids, filters.has_trampoline, filters.collection, etaMap, etaActive]);
+  }, [
+    rows,
+    filters.has_valley, filters.has_kids, filters.has_trampoline,
+    filters.region, filters.terrain, filters.facilityRaw,
+    filters.collection, filters.management,
+    managementCampLevels, etaMap, etaActive,
+  ]);
 
   const focused = useMemo(() => visibleRows.find(r => r.id === pickedId) || null, [visibleRows, pickedId]);
 
@@ -954,10 +1313,43 @@ function App() {
     tramp: visibleRows.filter(r => r.has_trampoline).length,
   }), [visibleRows]);
 
+  // List pagination + responsive infinite scroll. Only `displayCount` rows
+  // are mounted; an IntersectionObserver on a bottom sentinel grows the
+  // window in LIST_PAGE_SIZE steps. Reset on visibleRows change (filter /
+  // search / ETA toggle) and on view toggle (when the list section
+  // unmounts/remounts the scroll container).
+  const LIST_PAGE_SIZE = 30;
+  const [displayCount, setDisplayCount] = useState(LIST_PAGE_SIZE);
+  const listScrollRef = useRef(null);
+  const sentinelRef = useRef(null);
+  useEffect(() => {
+    setDisplayCount(LIST_PAGE_SIZE);
+    if (listScrollRef.current) listScrollRef.current.scrollTop = 0;
+  }, [visibleRows]);
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const root = listScrollRef.current;
+    if (!sentinel || !root) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setDisplayCount(c => Math.min(c + LIST_PAGE_SIZE, visibleRows.length));
+        }
+      },
+      { root, rootMargin: "300px 0px" }
+    );
+    obs.observe(sentinel);
+    return () => obs.disconnect();
+  }, [visibleRows, view]);
+  const displayedRows = useMemo(
+    () => visibleRows.slice(0, displayCount),
+    [visibleRows, displayCount]
+  );
+
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="topo border-b hairline">
+      <header className="topo border-b hairline flex-shrink-0">
         <div className="max-w-[1500px] mx-auto px-6 py-5 flex items-end justify-between gap-6">
           <div>
             <div className="flex items-center gap-3">
@@ -998,7 +1390,14 @@ function App() {
               <button onClick={() => setSearchResults(null)} className="btn ml-auto">전체보기</button>
             </div>
           )}
-          <FilterBar filters={filters} set={setF} facets={facets} rows={rows} />
+          <FilterBar
+            filters={filters}
+            setFilters={setFilters}
+            clearAll={clearAll}
+            facets={facets}
+            rows={rows}
+            mgmtLevelCounts={mgmtLevelCounts}
+          />
           <EtaBar
             origin={origin} setOrigin={setOrigin}
             hours={etaHours} setHours={setEtaHours}
@@ -1011,30 +1410,40 @@ function App() {
       </header>
 
       {/* Main */}
-      <main className="flex-1 max-w-[1500px] w-full mx-auto px-6 py-5 grid gap-5"
+      <main className="flex-1 min-h-0 max-w-[1500px] w-full mx-auto px-6 py-5 grid gap-5 overflow-hidden"
         style={{
           gridTemplateColumns: view === "split" ? "minmax(340px, 420px) 1fr" : "1fr",
         }}>
         {(view === "split" || view === "list") && (
-          <section className="min-h-0">
+          <section ref={listScrollRef} className="min-h-0 h-full overflow-y-auto pr-1">
             {loading && <div className="text-xs text-stone-500 mb-2">불러오는 중…</div>}
             {err && <div className="text-xs text-[color:var(--ember)] mb-2">API 연결 실패: {err}</div>}
             <CampList
-              rows={visibleRows}
+              rows={displayedRows}
               onPick={setPickedId}
               selectedId={pickedId}
               etaMap={etaMap}
             />
+            {visibleRows.length > 0 && displayCount < visibleRows.length && (
+              <div ref={sentinelRef} className="text-center text-[11px] text-stone-500 py-4">
+                더 불러오는 중… <span className="num">{displayCount} / {visibleRows.length.toLocaleString()}</span>
+              </div>
+            )}
+            {visibleRows.length > 0 && displayCount >= visibleRows.length && (
+              <div className="text-center text-[11px] text-stone-400 py-3">
+                — 끝 (<span className="num">{visibleRows.length.toLocaleString()}</span>곳) —
+              </div>
+            )}
           </section>
         )}
         {(view === "split" || view === "map") && (
-          <section className="card overflow-hidden" style={{ height: "calc(100vh - 280px)", minHeight: 420 }}>
+          <section className="card overflow-hidden h-full min-h-0">
             <MapView rows={visibleRows} onPick={setPickedId} focused={focused} etaMap={etaMap} />
           </section>
         )}
       </main>
 
-      <footer className="border-t hairline text-[11px] text-stone-500 px-6 py-3 flex items-center justify-between">
+      <footer className="border-t hairline text-[11px] text-stone-500 px-6 py-3 flex items-center justify-between flex-shrink-0">
         <span>지도 © OpenStreetMap contributors · 데이터: camfit-puller crawl</span>
         <span className="num">단축키: <span className="kbd">esc</span> 패널 닫기</span>
       </footer>

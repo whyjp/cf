@@ -95,11 +95,79 @@ def pipeline_ingest():
 
 
 @pipeline_app.command("geocode")
-def pipeline_geocode():
-    """address1 → lat/lon via Nominatim (cached)."""
+def pipeline_geocode(
+    workers: int = typer.Option(1, "--workers", "-w",
+                                help="Per-item parallel workers (ignored when the geocoder supports batch — etago fans out internally)."),
+    self_heal: bool = typer.Option(
+        True, "--self-heal/--no-self-heal",
+        help="Default ON: every run NULLs camps.lat/lon for coords shared by ≥3 camps "
+             "(admin-region centroids — the '100 camps on one pin' pollution from a "
+             "previous Nominatim pass) and drops the matching geocode-cache rows so "
+             "they re-resolve cleanly. Once data is clean, this is a no-op.",
+    ),
+    reset_all: bool = typer.Option(
+        False, "--reset-all",
+        help="NULL every camps.lat/lon AND clear the entire geocode-cache. Use after "
+             "switching providers or to verify a clean re-geocode end-to-end.",
+    ),
+):
+    """address1 → lat/lon via the configured geocoder (cached).
+
+    Switch geocoder via env: ``CAMFIT_GEOCODER=etago`` (default — uses Naver NCP +
+    Kakao K1 fallback through the etago binary) or ``CAMFIT_GEOCODER=nominatim``
+    (no key needed, lower precision).
+
+    Self-heal is on by default so ``pipeline run-all`` automatically rinses the
+    "many camps on one pin" pollution without needing flags. Disable with
+    ``--no-self-heal`` if you ever need to debug a specific persisted coord.
+    """
     c = _container()
-    out = c.geocode_pending().execute()
-    console.print(f"[geocode] {out}")
+    pool = c._pg
+    if reset_all:
+        with pool.conn() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE camps SET lat=NULL, lon=NULL, geocoded_at=NULL")
+            console.print(f"[geocode] reset-all: NULLed {cur.rowcount} camps.lat/lon")
+        n = c.geocode_cache.clear()
+        console.print(f"[geocode] reset-all: cleared {n} geocode-cache entries")
+    elif self_heal:
+        # Coord is "coarse" iff ≥3 camps share it — admin-region centroid
+        # signature. Threshold of 3 keeps legitimate coincidences (twin
+        # campsites at the same lot, clustered properties) safe.
+        # We NULL camps AND drop the matching geocode-cache rows so the
+        # next pass re-queries upstream instead of replaying the bad coord.
+        # Single statement: dupes CTE is materialized before the UPDATE
+        # NULLs the rows out from under it, so the cache DELETE still has
+        # the coord pairs to match against.
+        with pool.conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH dupes AS (
+                  SELECT lat, lon FROM camps
+                  WHERE lat IS NOT NULL AND lon IS NOT NULL
+                  GROUP BY lat, lon HAVING count(*) >= 3
+                ),
+                nulled AS (
+                  UPDATE camps c SET lat=NULL, lon=NULL, geocoded_at=NULL
+                  FROM dupes d
+                  WHERE c.lat = d.lat AND c.lon = d.lon
+                  RETURNING c.id
+                ),
+                purged AS (
+                  DELETE FROM geocodes g
+                  USING dupes d
+                  WHERE g.lat = d.lat AND g.lon = d.lon
+                  RETURNING g.query
+                )
+                SELECT (SELECT count(*) FROM nulled),
+                       (SELECT count(*) FROM dupes),
+                       (SELECT count(*) FROM purged)
+            """)
+            row = cur.fetchone()
+            n_camps, n_clusters, n_cache = row or (0, 0, 0)
+        if n_camps:
+            console.print(f"[geocode] self-heal: NULLed {n_camps} camps "
+                          f"({n_clusters} cluster centers) + dropped {n_cache} stale cache rows")
+    out = c.geocode_pending().execute(workers=max(1, workers))
+    console.print(f"[geocode] provider={c.settings.geocoder} {out}")
     c.close()
 
 

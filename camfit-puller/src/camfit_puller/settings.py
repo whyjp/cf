@@ -29,7 +29,9 @@ class Settings(BaseSettings):
 
     embedder: Literal["ko-sroberta", "mock"] = "ko-sroberta"
     vector: Literal["pgvector", "numpy"] = "pgvector"
-    geocoder: Literal["nominatim", "mock"] = "nominatim"
+    # geo resolution lives in the etago binary (Naver NCP + Kakao K1 fallback).
+    # `nominatim` is kept as a no-key fallback for offline/dev use.
+    geocoder: Literal["etago", "nominatim", "mock"] = "etago"
     data_source: Literal["camfit", "local-replay", "mock"] = "local-replay"
     eta_provider: Literal["etago", "mock"] = "etago"
 

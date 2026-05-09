@@ -3,50 +3,25 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Iterable, Optional
 
 from ...domain.models import EtaResult
+from ..etago_bin import resolve_etago_bin, EtagoUnavailable  # re-exported
 
 
-_THIS_DIR = Path(__file__).resolve().parent
-_REPO_ROOT_GUESS = _THIS_DIR.parents[4]  # eta/ → adapters/ → camfit_puller/ → src/ → camfit-puller/ → cf root
-
-
-def _resolve_bin() -> Optional[str]:
-    explicit = os.environ.get("ETAGO_BIN")
-    if explicit and Path(explicit).exists():
-        return explicit
-    on_path = shutil.which("etago")
-    if on_path:
-        return on_path
-    for cand in (
-        _REPO_ROOT_GUESS / "etago" / "etago.exe",
-        _REPO_ROOT_GUESS / "etago" / "etago",
-    ):
-        if cand.exists():
-            return str(cand)
-    return None
-
-
-class EtagoUnavailable(RuntimeError):
-    """Raised when the etago binary cannot be located."""
+__all__ = ["EtagoSubprocessProvider", "EtagoUnavailable"]
 
 
 @dataclass
 class EtagoSubprocessProvider:
-    bin_path: str = field(default_factory=lambda: _resolve_bin() or "")
+    # Empty default — __post_init__ resolves (and auto-builds) on first use.
+    bin_path: str = ""
     default_timeout_s: float = 12.0
 
     def __post_init__(self) -> None:
         if not self.bin_path:
-            raise EtagoUnavailable(
-                "etago binary not found. Set $ETAGO_BIN or build "
-                "<repo>/etago (`go build -o etago.exe ./cmd/etago`)."
-            )
+            self.bin_path = resolve_etago_bin()
 
     async def _fetch_one(self, origin: str, dest: str, timeout_s: float) -> EtaResult:
         cmd = [self.bin_path, "--json", "--timeout", f"{int(timeout_s)}s", origin, dest]

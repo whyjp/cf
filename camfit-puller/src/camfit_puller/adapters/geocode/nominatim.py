@@ -3,6 +3,12 @@
 Honors Nominatim ToS: max 1 req/sec, identifies via UA. The 1-req/sec gate is
 the *adapter's* responsibility — wrap with CachedGeocoder to avoid repeated calls
 for the same address.
+
+Coarse-match guard: Nominatim cheerfully returns county/district centroids
+when it can't resolve a road or 지번 — that's how 100+ camps ended up at the
+same (lat, lon) on the FE map. We reject any result whose `osm_type` /
+`class` / `addresstype` indicates an admin-level boundary instead of a
+building/road point.
 """
 from __future__ import annotations
 import threading
@@ -16,6 +22,15 @@ from ...domain.models import GeoPoint
 
 _KR_LAT = (33.0, 39.0)
 _KR_LON = (124.0, 132.0)
+
+# Nominatim address types that mean "we matched the admin region, not the
+# specific spot". These are the queries that produce 100-camps-on-one-pin.
+_COARSE_ADDRESS_TYPES = {
+    "country", "state", "region", "province",
+    "county", "city", "town", "village", "municipality",
+    "borough", "city_district", "suburb", "neighbourhood",
+}
+_COARSE_CLASSES = {"boundary", "place"}
 
 
 class NominatimGeocoder:
@@ -56,6 +71,7 @@ class NominatimGeocoder:
                     "limit": 1,
                     "countrycodes": "kr",
                     "accept-language": "ko",
+                    "addressdetails": 1,
                 },
                 headers={"User-Agent": self._ua, "Accept": "application/json"},
             )
@@ -63,8 +79,15 @@ class NominatimGeocoder:
             data = r.json()
             if not data:
                 return None
-            lat = float(data[0]["lat"])
-            lon = float(data[0]["lon"])
+            doc = data[0]
+            atype = (doc.get("addresstype") or "").lower()
+            klass = (doc.get("class") or "").lower()
+            # Admin-level / boundary results are dropped — they're how every
+            # camp in 영월군 ends up at the county centroid.
+            if atype in _COARSE_ADDRESS_TYPES or klass in _COARSE_CLASSES:
+                return None
+            lat = float(doc["lat"])
+            lon = float(doc["lon"])
             if not (_KR_LAT[0] <= lat <= _KR_LAT[1] and _KR_LON[0] <= lon <= _KR_LON[1]):
                 return None
             return GeoPoint(lat=lat, lon=lon)
