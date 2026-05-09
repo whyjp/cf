@@ -1,6 +1,18 @@
 """Use-case: seed concept vocabulary + auto-derive from existing camp data.
 
-Idempotent — re-running is safe (UPSERT behavior on the repo).
+Idempotent — re-running is safe (UPSERT on id, plus name-conflict resolution
+that privileges curated seeds over auto-derived hashtag concepts).
+
+Seed-vs-hashtag UNIQUE(name) collision:
+  The `concepts.name` column has a UNIQUE constraint. A previous vocab run
+  may have inserted `(id='h_청결', name='청결', source='hashtag')`. On the
+  next run with a new seed `(id='mgmt_clean2', name='청결', source='manual',
+  category='management')`, an ON CONFLICT (id) clause does NOT catch the
+  collision — the INSERT fails on UNIQUE(name) and breaks the seed pass.
+  This use-case detects that case and deletes the conflicting auto-derived
+  row first so the seed wins. Auto-derived rows are reproducible from
+  raw data; seeds carry curated category/is_axis metadata that's harder
+  to rebuild.
 """
 from __future__ import annotations
 import re
@@ -25,9 +37,16 @@ class BuildVocabulary:
 
     def execute(self) -> int:
         n = 0
-        # 1) Curated seeds
+        # 1) Curated seeds. Before each upsert, resolve any UNIQUE(name)
+        # collision by deleting an existing auto-derived row that holds the
+        # same name under a different id. Seeds are authoritative; the
+        # hashtag pass will simply re-skip the freed name later in this run.
         seed_names: set[str] = {name for _, name, *_ in SEEDS}
+        seed_ids: set[str] = {cid for cid, *_ in SEEDS}
         for cid, name, category, is_axis in SEEDS:
+            existing = self.concept_repo.find_by_name(name)
+            if existing is not None and existing.id != cid and existing.id not in seed_ids:
+                self.concept_repo.delete_by_id(existing.id)
             self.concept_repo.upsert_concept(
                 Concept(id=cid, name=name, source="manual",
                         category=category, is_axis=is_axis)
@@ -35,7 +54,7 @@ class BuildVocabulary:
             n += 1
         # 2) Auto-derived from camp hashtags + facilities
         # Track both id slugs and names to avoid UNIQUE(name) collisions with seeds.
-        seen: set[str] = {cid for cid, *_ in SEEDS}
+        seen: set[str] = set(seed_ids)
         seen_names: set[str] = set(seed_names)
         for camp in self.camp_reader.iter_all():
             for h in camp.hashtags:

@@ -50,3 +50,23 @@ class PostgresConceptRepo:
                 )
                 for r in cur.fetchall()
             ]
+
+    def find_by_name(self, name: str):
+        with self._pool.conn() as cn, cn.cursor() as cur:
+            cur.execute(
+                "SELECT id, name, source, category, description, is_axis FROM concepts WHERE name=%s",
+                (name,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return Concept(
+                id=row[0], name=row[1], source=row[2], category=row[3],
+                description=row[4], is_axis=row[5],
+            )
+
+    def delete_by_id(self, concept_id: str) -> None:
+        # FK constraints on signal tables use ON DELETE CASCADE — see
+        # alembic 0001_initial.py — so dependent rows clean up transparently.
+        with self._pool.conn() as cn, cn.cursor() as cur:
+            cur.execute("DELETE FROM concepts WHERE id=%s", (concept_id,))

@@ -158,9 +158,12 @@ class Container:
         if self.settings.geocoder == "mock":
             from .adapters.geocode.mock import MockGeocoder
             return MockGeocoder()
-        from .adapters.geocode.nominatim import NominatimGeocoder
         from .adapters.geocode.cached import CachedGeocoder
-        return CachedGeocoder(NominatimGeocoder(), self.geocode_cache)
+        if self.settings.geocoder == "etago":
+            from .adapters.geocode.etago_subprocess import EtagoGeocoderSubprocess
+            return CachedGeocoder(EtagoGeocoderSubprocess(), self.geocode_cache, source="etago")
+        from .adapters.geocode.nominatim import NominatimGeocoder
+        return CachedGeocoder(NominatimGeocoder(), self.geocode_cache, source="nominatim")
 
     @cached_property
     def eta(self):
