@@ -47,3 +47,6 @@ packages = ["src/camfit_puller"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests as integration tests that require a live docker stack (deselect with '-m not integration')",
+]
