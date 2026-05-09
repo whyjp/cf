@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>camfit-puller — 지식그래프</title>
+<title>camfit-puller — 지식그래프 (3D)</title>
 
 <!-- Pretendard 한글 -->
 <link rel="stylesheet" as="style" crossorigin
@@ -16,11 +16,10 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-<!-- Cytoscape + cose-bilkent layout extension -->
-<script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
-<script src="https://unpkg.com/layout-base@1.0.2/layout-base.js"></script>
-<script src="https://unpkg.com/cose-base@1.0.3/cose-base.js"></script>
-<script src="https://unpkg.com/cytoscape-cose-bilkent@4.1.0/cytoscape-cose-bilkent.js"></script>
+<!-- Three.js + 3d-force-graph (GPU/WebGL accelerated) -->
+<script src="https://unpkg.com/three@0.155.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three-spritetext@1.8.2/dist/three-spritetext.min.js"></script>
+<script src="https://unpkg.com/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
 
 <!-- React + Babel (UMD prototype) -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -85,23 +84,23 @@
   ::-webkit-scrollbar-thumb { background: rgba(26,26,23,0.2); border-radius: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
 
-  /* graph canvas — paper-tone background, hairline border */
-  #cy-host {
-    background:
-      radial-gradient(900px 600px at 50% 30%, rgba(44,74,62,0.06), transparent 70%),
-      var(--paper);
+  /* graph canvas — paper-tone background, hairline border. 3d-force-graph
+     mounts a <canvas> inside our host div. */
+  #fg-host {
+    background: var(--paper);
     border: 1px solid rgba(26,26,23,0.10);
     border-radius: 14px;
     overflow: hidden;
     position: relative;
   }
-  #cy { width: 100%; height: 100%; }
-  .cy-legend {
+  #fg-host canvas { display: block; }
+  .fg-legend {
     position: absolute; bottom: 10px; left: 10px;
     background: rgba(244,241,232,0.9); backdrop-filter: blur(6px);
     border: 1px solid rgba(26,26,23,0.10); border-radius: 10px;
     padding: 6px 10px; font-size: 11px; color: rgba(26,26,23,0.7);
     pointer-events: none;
+    z-index: 5;
   }
   .leaflet-container { background: #e7e1cf; font-family: inherit; }
 </style>
@@ -135,26 +134,16 @@ function prettyTag(name) {
 // ─────────────────────────────────────────────────────────────
 // Node / Edge registries — known labels carry intent, unknown
 // labels fall back to a generic renderer derived from tagHue().
-// To "promote" a new label to first-class, add an entry here.
+// 3D-force-graph rendering uses color/size/baseSize; shape is
+// not directly meaningful (every node is a sphere by default,
+// or a SpriteText for Region anchors).
 // ─────────────────────────────────────────────────────────────
-// Region is the convergence anchor (paper-toned, bark border, distinct shape).
-// Camps cluster around it as small filled dots. Categories/Facilities are even
-// smaller to avoid visual clash. Sizes are intentionally compact — readable on
-// hover/zoom, never crowding the canvas at default zoom.
 const NODE_REGISTRY = {
-  // Distinguishing axis = shape + color, NOT size. The `size` field below is
-  // a *base* size — the actual rendered size scales with the node's degree
-  // (edge convergence count) so popular nodes naturally read as hubs and
-  // isolated nodes stay quiet.
   Region: {
-    shape: "round-rectangle",
-    color: "#f4f1e8",
-    border: "#6b4f2c",
-    borderWidth: 1.4,
+    color: "#6b4f2c",
+    border: "#3d2c14",
     textColor: "#3d2c14",
-    size: 7,
-    fontSize: 9,
-    fontWeight: 700,
+    size: 6,
     label: (p) => {
       const sido = (p.sido || "").trim();
       const sigungu = (p.sigungu || "").trim();
@@ -163,13 +152,10 @@ const NODE_REGISTRY = {
     },
   },
   Camp: {
-    shape: "ellipse",
     color: "#2c4a3e",
     border: "#1a2f26",
-    borderWidth: 0.6,
     textColor: "#1a1a17",
-    size: 5,
-    fontSize: 8.5,
+    size: 3,
     label: (p) => p.name || "(이름 미상)",
     badge: (p) => [
       p.has_valley && "🌊",
@@ -178,32 +164,25 @@ const NODE_REGISTRY = {
     ].filter(Boolean).join(""),
   },
   Category: {
-    shape: "diamond",
-    color: null,             // dynamic from tagHue
+    color: null,
     border: "#1a1a17",
-    borderWidth: 0.5,
     textColor: "#1a1a17",
-    size: 5,
-    fontSize: 8,
+    size: 2.5,
     label: (p) => prettyTag(p.name || ""),
   },
   Facility: {
-    shape: "hexagon",
     color: "#2c6e7b",
     border: "#1a4750",
-    borderWidth: 0.5,
     textColor: "#1a1a17",
-    size: 5,
-    fontSize: 8,
+    size: 2.5,
     label: (p) => p.name || "",
   },
 };
 
 const EDGE_REGISTRY = {
-  // LOCATED_IN is the convergence axis — bark, thick, fully opaque.
-  LOCATED_IN:   { color: "#6b4f2c", width: 1.8, style: "solid",  opacity: 0.80 },
-  HAS_CATEGORY: { color: "#2c4a3e", width: 0.7, style: "solid",  opacity: 0.40 },
-  HAS_FACILITY: { color: "#2c6e7b", width: 0.5, style: "dashed", opacity: 0.32 },
+  LOCATED_IN:   { color: "#6b4f2c", width: 1.5, opacity: 0.80 },
+  HAS_CATEGORY: { color: "#2c4a3e", width: 0.7, opacity: 0.40 },
+  HAS_FACILITY: { color: "#2c6e7b", width: 0.5, opacity: 0.32 },
 };
 
 function nodeStyleFor(label, props) {
@@ -214,19 +193,16 @@ function nodeStyleFor(label, props) {
     return { ...reg, color };
   }
   return {
-    shape: "ellipse",
     color: tagHue(label || ""),
     border: "#1a1a17",
-    borderWidth: 0.6,
     textColor: "#1a1a17",
-    size: 10,
-    fontSize: 8,
+    size: 3,
     label: (p) => p.name || p.title || p.id || "",
     badge: () => "",
   };
 }
 function edgeStyleFor(label) {
-  return EDGE_REGISTRY[label] || { color: tagHue(label || ""), width: 0.7, style: "solid", opacity: 0.45 };
+  return EDGE_REGISTRY[label] || { color: tagHue(label || ""), width: 0.7, opacity: 0.45 };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -241,333 +217,155 @@ function useSchema() {
   return { schema, err };
 }
 
-function useSeed(activeLabels, limit, reloadKey) {
+function useFacets() {
+  const [data, setData] = useState({ regions: [], categories: [], facilities: [], concept_axes: [], concepts: [], themes: [] });
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    fetch(`${API}/facets`).then(r => r.json()).then(setData).catch(e => setErr(String(e)));
+  }, []);
+  return { data, err };
+}
+
+function useSeed(filters, reloadKey) {
   const [data, setData] = useState({ nodes: [], edges: [] });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   useEffect(() => {
-    if (!activeLabels) return;
     const params = new URLSearchParams();
-    if (activeLabels.length) params.set("labels", activeLabels.join(","));
-    params.set("limit", String(limit));
+    if (filters.labels && filters.labels.length) params.set("labels", filters.labels.join(","));
+    params.set("limit", String(filters.limit));
+    if (filters.sido) params.set("sido", filters.sido);
+    if (filters.sigungu) params.set("sigungu", filters.sigungu);
+    if (filters.concept) params.set("concept", filters.concept);
+    if (filters.eta_origin) params.set("eta_origin", filters.eta_origin);
+    if (filters.eta_max_minutes != null) params.set("eta_max_minutes", String(filters.eta_max_minutes));
     setLoading(true); setErr(null);
     fetch(`${API}/graph/sample?${params}`)
       .then(r => r.json())
       .then(setData)
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
-  }, [activeLabels && activeLabels.join(","), limit, reloadKey]);
+  }, [JSON.stringify(filters), reloadKey]);
   return { data, loading, err };
 }
 
 // ─────────────────────────────────────────────────────────────
-// Cytoscape canvas
+// 3d-force-graph canvas
 // ─────────────────────────────────────────────────────────────
-function GraphCanvas({ elements, layoutName, hiddenLabels, hiddenEdges, onPick, focusedId, labelVisible, focusLabel }) {
+function GraphCanvas({ graphData, dimensions, onPick, focusedId }) {
   const hostRef = useRef(null);
-  const cyRef = useRef(null);
+  const fgRef = useRef(null);
+  const dataRef = useRef(graphData);
+  dataRef.current = graphData;
 
+  // Mount once.
   useEffect(() => {
-    if (cyRef.current) return;
-    const cy = cytoscape({
-      container: hostRef.current,
-      elements: [],
-      style: [
-        {
-          selector: "node",
-          style: {
-            "label": "data(displayLabel)",
-            "color": "data(textColor)",
-            "text-outline-width": 2,
-            "text-outline-color": "#f4f1e8",
-            "background-color": "data(color)",
-            "border-color": "data(border)",
-            "border-width": "data(borderWidth)",
-            "shape": "data(shape)",
-            "width": "data(size)",
-            "height": "data(size)",
-            "font-size": "data(fontSize)",
-            "font-weight": "data(fontWeight)",
-            "font-family": "Pretendard Variable, Pretendard, system-ui, sans-serif",
-            "text-valign": "bottom",
-            "text-margin-y": 3,
-            "text-wrap": "wrap",
-            "text-max-width": 140,
-            "min-zoomed-font-size": 9,
-          },
-        },
-        {
-          selector: "node:selected",
-          style: { "border-width": 3, "border-color": "#1a1a17" },
-        },
-        {
-          // Per-label name visibility — class applied when this node's label
-          // type is currently toggled OFF in the labelVisible set.
-          selector: "node.label-hidden",
-          style: { "label": "" },
-        },
-        {
-          // Temporary label show on hover and persistent label show on pick —
-          // both override `.label-hidden` so neighbors of focused nodes
-          // become readable regardless of the per-label filter.
-          selector: "node.show-label-temp, node.show-label-pick",
-          style: { "label": "data(displayLabel)" },
-        },
-        {
-          selector: "node.dim",
-          style: { "opacity": 0.14 },
-        },
-        {
-          selector: "node.faded",
-          style: { "opacity": 0.18 },
-        },
-        {
-          selector: "node.focused, node.pick-highlight",
-          style: { "border-width": 2.5, "border-color": "#1a1a17", "z-index": 10 },
-        },
-        {
-          selector: "edge.pick-highlight",
-          style: { "opacity": 1, "width": "mapData(width, 0, 5, 1.5, 6)" },
-        },
-        {
-          selector: "edge",
-          style: {
-            "curve-style": "bezier",
-            "line-color": "data(color)",
-            "width": "data(width)",
-            "line-style": "data(style)",
-            "target-arrow-shape": "triangle",
-            "target-arrow-color": "data(color)",
-            "arrow-scale": 0.7,
-            "opacity": "data(opacity)",
-          },
-        },
-        {
-          selector: "edge.dim",
-          style: { "opacity": 0.05 },
-        },
-        {
-          selector: "edge.faded",
-          style: { "opacity": 0.08 },
-        },
-      ],
-      wheelSensitivity: 0.3,
-      minZoom: 0.2,
-      maxZoom: 3.5,
-    });
-    cy.on("tap", "node", (ev) => onPick(ev.target.id()));
-    cy.on("tap", (ev) => { if (ev.target === cy) onPick(null); });
-    // Hover: emphasize closed neighborhood + show their labels temporarily.
-    cy.on("mouseover", "node", (ev) => {
-      const n = ev.target;
-      const hood = n.closedNeighborhood();
-      cy.batch(() => {
-        cy.elements().not(hood).addClass("faded");
-        hood.addClass("show-label-temp");
-        n.addClass("focused");
-      });
-    });
-    cy.on("mouseout", "node", (ev) => {
-      cy.batch(() => {
-        cy.elements().removeClass("faded show-label-temp");
-        ev.target.removeClass("focused");
-      });
-    });
-    cyRef.current = cy;
+    if (fgRef.current || !hostRef.current) return;
+    if (typeof ForceGraph3D === "undefined") {
+      console.error("3d-force-graph not loaded");
+      return;
+    }
+    const SpriteText = (typeof window !== "undefined" && window.SpriteText) || null;
+    const fg = ForceGraph3D()(hostRef.current)
+      .backgroundColor("#f4f1e8")
+      .nodeRelSize(4)
+      .nodeOpacity(0.9)
+      .nodeLabel(n => {
+        const badge = n.badge ? `${n.badge} ` : "";
+        return `<div style="background:rgba(244,241,232,0.95);color:#1a1a17;padding:4px 8px;border-radius:6px;border:1px solid rgba(26,26,23,0.18);font-family:Pretendard Variable,Pretendard,sans-serif;font-size:12px;">
+          <span style="opacity:0.6;font-size:10px;">${n.label || ""}</span><br/>
+          <strong>${badge}${(n.displayLabel || "").replace(/</g, "&lt;")}</strong>
+        </div>`;
+      })
+      .nodeColor(n => n.color || "#2c4a3e")
+      .nodeVal(n => Math.max(0.5, (n.baseSize || 3) * 0.5))
+      .linkColor(l => l.color || "#6b4f2c")
+      .linkOpacity(0.55)
+      .linkWidth(l => l.width || 0.6)
+      .linkDirectionalArrowLength(2)
+      .linkDirectionalArrowRelPos(0.95)
+      .cooldownTicks(120)
+      .warmupTicks(40)
+      .onNodeClick(n => onPick && onPick(n.id))
+      .onBackgroundClick(() => onPick && onPick(null));
+
+    // Region anchors as SpriteText labels (always-visible 3D text). Falls
+    // back to hover-only labels when three-spritetext failed to load.
+    if (SpriteText) {
+      fg.nodeThreeObject(n => {
+        if (n.label !== "Region") return null;
+        const text = new SpriteText(n.displayLabel || "");
+        text.color = "#3d2c14";
+        text.backgroundColor = "rgba(244,241,232,0.85)";
+        text.padding = 2;
+        text.borderRadius = 3;
+        text.fontFace = "Pretendard Variable, sans-serif";
+        text.fontWeight = "600";
+        text.textHeight = 6;
+        return text;
+      })
+      .nodeThreeObjectExtend(true);
+    }
+
+    fgRef.current = fg;
+
+    // Resize handler
+    const resize = () => {
+      if (!hostRef.current || !fgRef.current) return;
+      fgRef.current
+        .width(hostRef.current.clientWidth)
+        .height(hostRef.current.clientHeight);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
   }, []);
 
-  // Sync elements
+  // Sync data.
   useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    cy.startBatch();
-    cy.elements().remove();
-    cy.add(elements);
-    cy.endBatch();
-    if (elements.length) {
-      const layout = cy.layout(layoutOptions(layoutName, cy));
-      layout.run();
-    }
-  }, [elements]);
+    const fg = fgRef.current;
+    if (!fg) return;
+    fg.graphData(graphData);
+  }, [graphData]);
 
-  // Re-run layout when name changes
+  // 2D / 3D toggle.
   useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy || !elements.length) return;
-    cy.layout(layoutOptions(layoutName, cy)).run();
-  }, [layoutName]);
+    const fg = fgRef.current;
+    if (!fg) return;
+    fg.numDimensions(dimensions === "2d" ? 2 : 3);
+  }, [dimensions]);
 
-  // Degree-weighted size — popular nodes (more incident edges) read as hubs,
-  // isolated nodes stay quiet. Log scaling keeps the largest hub at most
-  // ~3-4× the base size even with hundreds of incident edges.
+  // Focus pan to picked node.
   useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const degree = new Map();
-    cy.edges().forEach(e => {
-      degree.set(e.data("source"), (degree.get(e.data("source")) || 0) + 1);
-      degree.set(e.data("target"), (degree.get(e.data("target")) || 0) + 1);
-    });
-    cy.batch(() => {
-      cy.nodes().forEach(n => {
-        const base = n.data("baseSize");
-        if (base == null) return;
-        const d = degree.get(n.id()) || 0;
-        const sz = Math.round(base + Math.log2(d + 1) * 2.2);
-        n.data("size", sz);
-      });
-    });
-  }, [elements]);
-
-  // Per-label name-visibility filter. A label-type is shown when it's in
-  // the labelVisible set; otherwise its nodes get `.label-hidden`. The
-  // hover/pick handlers can still override this per-node via the
-  // `.show-label-temp` / `.show-label-pick` classes.
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    cy.batch(() => {
-      cy.nodes().forEach(n => {
-        if (labelVisible && labelVisible.has(n.data("label"))) {
-          n.removeClass("label-hidden");
-        } else {
-          n.addClass("label-hidden");
-        }
-      });
-    });
-  }, [elements, labelVisible]);
-
-  // Persistent pick highlight — when a node is picked (clicked), it and its
-  // 1-hop neighborhood get a visible border and their labels stay shown.
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    cy.batch(() => {
-      cy.elements().removeClass("show-label-pick pick-highlight");
-      if (focusedId) {
-        const n = cy.getElementById(focusedId);
-        if (n && n.length) {
-          const hood = n.closedNeighborhood();
-          hood.addClass("show-label-pick pick-highlight");
-        }
+    const fg = fgRef.current;
+    if (!fg || !focusedId) return;
+    const node = (graphData.nodes || []).find(n => n.id === focusedId);
+    if (!node) return;
+    // Wait a tick so simulation has positioned it.
+    const t = setTimeout(() => {
+      const pos = node;
+      if (pos.x == null || pos.y == null) return;
+      const distance = 120;
+      const distRatio = 1 + distance / Math.hypot(pos.x || 1, pos.y || 1, pos.z || 1);
+      if (dimensions === "3d") {
+        fg.cameraPosition(
+          { x: (pos.x || 0) * distRatio, y: (pos.y || 0) * distRatio, z: (pos.z || 0) * distRatio },
+          pos,
+          800,
+        );
+      } else {
+        fg.centerAt(pos.x, pos.y, 800);
+        fg.zoom(2.5, 800);
       }
-    });
-  }, [elements, focusedId]);
-
-  // Apply label/edge visibility filter + focus-mode dimming. We use the
-  // "dim" class for hard hide (label/edge toggles) and rely on hover for
-  // transient ".faded" — focus uses "dim" on non-relevant nodes/edges.
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    cy.batch(() => {
-      cy.nodes().removeClass("dim");
-      cy.edges().removeClass("dim");
-      if (hiddenLabels && hiddenLabels.size) {
-        cy.nodes().forEach(n => {
-          if (hiddenLabels.has(n.data("label"))) n.addClass("dim");
-        });
-      }
-      if (hiddenEdges && hiddenEdges.size) {
-        cy.edges().forEach(e => {
-          if (hiddenEdges.has(e.data("label"))) e.addClass("dim");
-        });
-      }
-      // Focus mode — when a label is focused, dim everything outside that
-      // label's 1-hop closed neighborhood.
-      if (focusLabel) {
-        const anchor = cy.nodes(`[label = "${focusLabel}"]`);
-        if (anchor.length) {
-          const keep = anchor.closedNeighborhood();
-          cy.elements().not(keep).addClass("dim");
-        }
-      }
-      // Cascade — edges touching a dim node also dim.
-      cy.edges().forEach(e => {
-        if (e.source().hasClass("dim") || e.target().hasClass("dim")) e.addClass("dim");
-      });
-    });
-  }, [elements, hiddenLabels, hiddenEdges, focusLabel]);
-
-  // Pan to focused node
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy || !focusedId) return;
-    const n = cy.getElementById(focusedId);
-    if (n && n.length) {
-      cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.2) }, { duration: 280 });
-    }
-  }, [focusedId]);
+    }, 60);
+    return () => clearTimeout(t);
+  }, [focusedId, graphData, dimensions]);
 
   return (
-    <div id="cy-host" className="w-full h-full">
-      <div ref={hostRef} id="cy" />
-      <div className="cy-legend">drag · scroll = zoom · click 노드 = 상세</div>
+    <div id="fg-host" className="w-full h-full" ref={hostRef}>
+      <div className="fg-legend">drag · scroll = zoom · click 노드 = 상세 · {dimensions === "3d" ? "3D" : "2D"}</div>
     </div>
   );
-}
-
-function layoutOptions(name, cy) {
-  if (name === "region-tree") {
-    // Breadth-first rooted at Region — Region on top, Camps in row below,
-    // attributes further out. Works best for small seeds (≤40 nodes).
-    let roots;
-    if (cy) {
-      const r = cy.nodes('[label = "Region"]');
-      if (r.length) roots = r;
-    }
-    return {
-      name: "breadthfirst",
-      directed: false,
-      roots: roots,
-      spacingFactor: 1.6,
-      padding: 50,
-      animate: "end",
-      animationDuration: 420,
-      avoidOverlap: true,
-      avoidOverlapPadding: 16,
-      grid: false,
-    };
-  }
-  if (name === "concentric") {
-    // Region innermost (the anchor), Camp next, attributes outermost.
-    return {
-      name: "concentric",
-      animate: "end", animationDuration: 380,
-      concentric: (n) => {
-        const lbl = n.data("label");
-        if (lbl === "Region") return 4;
-        if (lbl === "Camp") return 3;
-        if (lbl === "Category") return 2;
-        if (lbl === "Facility") return 1;
-        return 0;
-      },
-      levelWidth: () => 1,
-      minNodeSpacing: 30,
-      padding: 40,
-      avoidOverlap: true,
-    };
-  }
-  // "force" (cose-bilkent) — organic clustering. High repulsion + long ideal
-  // edges + low gravity push nodes apart so dense Camp clusters don't pile
-  // on top of each other.
-  return {
-    name: "cose-bilkent",
-    animate: "end",
-    animationDuration: 520,
-    fit: true,
-    padding: 50,
-    nodeRepulsion: 22000,
-    idealEdgeLength: 110,
-    edgeElasticity: 0.35,
-    gravity: 0.06,
-    gravityRangeCompound: 1.2,
-    gravityCompound: 0.5,
-    nestingFactor: 0.1,
-    randomize: true,
-    quality: "default",
-    tile: false,
-  };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -596,13 +394,12 @@ function MiniMap({ lat, lon, name }) {
 // ─────────────────────────────────────────────────────────────
 function DetailPanel({ node, onClose, onExpand, expanding }) {
   if (!node) return null;
-  const label = node.data.label;
-  const props = node.data.props || {};
+  const label = node.label;
+  const props = node.props || {};
   const reg = nodeStyleFor(label, props);
-  const title = (typeof reg.label === "function" ? reg.label(props) : "") || node.data.id;
+  const title = (typeof reg.label === "function" ? reg.label(props) : "") || node.id;
   const badge = typeof reg.badge === "function" ? reg.badge(props) : "";
 
-  // Pretty-print props as a flat key/value list.
   const entries = Object.entries(props).filter(([, v]) => v != null && v !== "");
   const truncate = (v) => {
     if (Array.isArray(v)) return v.slice(0, 12).map(String).join(", ") + (v.length > 12 ? ` … (+${v.length - 12})` : "");
@@ -626,7 +423,7 @@ function DetailPanel({ node, onClose, onExpand, expanding }) {
             {badge && <span className="mr-1">{badge}</span>}
             {title}
           </h2>
-          <div className="text-[10px] num text-stone-400 mt-1 break-all">{node.data.id}</div>
+          <div className="text-[10px] num text-stone-400 mt-1 break-all">{node.id}</div>
         </div>
 
         {label === "Camp" && (props.lat != null && props.lon != null) && (
@@ -718,99 +515,161 @@ function SearchBox({ onPickResult }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// EtaBar — same shape/feel as fe/index.html EtaBar.
+// ─────────────────────────────────────────────────────────────
+function EtaBar({ origin, setOrigin, hours, setHours, mins, setMins, etaActive, setEtaActive, onApply, onClear, loading }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap p-2.5 rounded-xl border hairline" style={{ background: "rgba(44,74,62,0.04)" }}>
+      <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1 shrink-0">출발지 ETA</span>
+      <input
+        value={origin}
+        onChange={(e) => setOrigin(e.target.value)}
+        placeholder="예: 강남역, 서울역, 수원시청"
+        className="text-sm bg-[color:var(--paper)] border hairline rounded-md px-2.5 py-1.5 outline-none focus:border-stone-900 min-w-[180px] flex-1 max-w-[260px]"
+      />
+      <span className="text-[10px] text-stone-500">최대</span>
+      <input
+        type="number" min="0" max="23"
+        value={hours}
+        onChange={(e) => setHours(Math.max(0, Math.min(23, parseInt(e.target.value || "0", 10))))}
+        className="text-sm bg-[color:var(--paper)] border hairline rounded-md w-14 px-2 py-1.5 num text-right outline-none focus:border-stone-900"
+      />
+      <span className="text-[11px] text-stone-500">시</span>
+      <input
+        type="number" min="0" max="59" step="5"
+        value={mins}
+        onChange={(e) => setMins(Math.max(0, Math.min(59, parseInt(e.target.value || "0", 10))))}
+        className="text-sm bg-[color:var(--paper)] border hairline rounded-md w-14 px-2 py-1.5 num text-right outline-none focus:border-stone-900"
+      />
+      <span className="text-[11px] text-stone-500">분</span>
+      <button onClick={onApply} disabled={loading || !origin.trim()} className="btn btn-primary">
+        {loading ? "계산 중…" : "ETA 적용"}
+      </button>
+      {etaActive && (
+        <button onClick={onClear} className="btn">해제</button>
+      )}
+      <label className="flex items-center gap-1.5 ml-1 text-[11px] text-stone-600 cursor-pointer select-none" title="시간 초과 캠프를 숨기기">
+        <input type="checkbox" checked={etaActive} onChange={(e) => setEtaActive(e.target.checked)} className="accent-stone-700" />
+        시간 내만
+      </label>
+    </div>
+  );
+}
+
+function minutesFrom(h, m) { return Math.max(0, (h | 0) * 60 + (m | 0)); }
+
+// ─────────────────────────────────────────────────────────────
 // App
 // ─────────────────────────────────────────────────────────────
 function App() {
   const { schema, err: schemaErr } = useSchema();
-  // No label-side API filter — seed fetches everything; user "selection" is
-  // visual focus + edge-type hide (client-side dim).
-  const [focusLabel, setFocusLabel] = useState(null);
-  const [hiddenEdges, setHiddenEdges] = useState(new Set());
-  const [layoutName, setLayoutName] = useState("force");
-  const [limit, setLimit] = useState(50);
-  // Per-label name-visibility filter. Default: only Region labels visible
-  // (the anchors). Other label types' names appear on hover/click.
-  const [labelVisible, setLabelVisible] = useState(() => new Set(["Region"]));
+  const { data: facets, err: facetsErr } = useFacets();
+
+  // Filter state
+  const [selectedSido, setSelectedSido] = useState(null);
+  const [selectedSigungu, setSelectedSigungu] = useState(null);
+  const [selectedConcept, setSelectedConcept] = useState(null);
+  const [limit, setLimit] = useState(1000);
   const [reloadKey, setReloadKey] = useState(0);
-  const { data: seed, loading, err } = useSeed([], limit, reloadKey);
+
+  // ETA state
+  const [etaOrigin, setEtaOrigin] = useState("");
+  const [etaHours, setEtaHours] = useState(2);
+  const [etaMins, setEtaMins] = useState(0);
+  const [etaActive, setEtaActive] = useState(false);   // when true, send eta_origin+eta_max_minutes to API
+  const [etaApplied, setEtaApplied] = useState(null);  // {origin, max_minutes} that's currently in effect
+
+  // 3D / 2D toggle
+  const [dimensions, setDimensions] = useState("3d");
+
+  const seedFilters = useMemo(() => ({
+    labels: [],
+    limit,
+    sido: selectedSido || null,
+    sigungu: selectedSigungu || null,
+    concept: selectedConcept || null,
+    eta_origin: etaApplied?.origin || null,
+    eta_max_minutes: etaApplied?.max_minutes || null,
+  }), [limit, selectedSido, selectedSigungu, selectedConcept, etaApplied]);
+
+  const { data: seed, loading, err } = useSeed(seedFilters, reloadKey);
   const [picked, setPicked] = useState(null);
   const [expanding, setExpanding] = useState(false);
 
-  // Merged elements (seed + expansions)
-  const [elements, setElements] = useState([]);
-  // node by id lookup, kept in sync
+  // 3d-force-graph data shape: { nodes: [{id, ...}], links: [{source: id, target: id, ...}] }
+  const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const nodeIndex = useRef(new Map());
+  const linkIndex = useRef(new Set());
 
-  // Build cytoscape data for one node from API payload.
-  const buildNodeEl = (n) => {
+  const buildNode = (n) => {
     const reg = nodeStyleFor(n.data.label, n.data.props);
     const displayLabel = typeof reg.label === "function" ? reg.label(n.data.props) : "";
+    const badge = typeof reg.badge === "function" ? reg.badge(n.data.props) : "";
     return {
-      group: "nodes",
-      data: {
-        id: n.data.id,
-        label: n.data.label,
-        props: n.data.props || {},
-        displayLabel: displayLabel || n.data.id,
-        color: reg.color,
-        border: reg.border,
-        borderWidth: reg.borderWidth || 0.8,
-        textColor: reg.textColor || "#1a1a17",
-        // `size` is the rendered radius — overwritten by the degree-weighted
-        // pass in GraphCanvas. `baseSize` is the immutable label-default and
-        // is what that effect reads for the per-node minimum.
-        baseSize: reg.size,
-        size: reg.size,
-        shape: reg.shape,
-        fontSize: reg.fontSize,
-        fontWeight: reg.fontWeight || 500,
-      },
+      id: n.data.id,
+      label: n.data.label,
+      props: n.data.props || {},
+      displayLabel: displayLabel || n.data.id,
+      color: reg.color,
+      border: reg.border,
+      textColor: reg.textColor,
+      baseSize: reg.size,
+      badge,
     };
   };
-  const buildEdgeEl = (e) => {
+  const buildLink = (e) => {
     const reg = edgeStyleFor(e.data.label);
     return {
-      group: "edges",
-      data: {
-        ...e.data,
-        color: reg.color,
-        width: reg.width,
-        style: reg.style,
-        opacity: reg.opacity != null ? reg.opacity : 0.55,
-      },
+      id: e.data.id,
+      source: e.data.source,
+      target: e.data.target,
+      label: e.data.label,
+      color: reg.color,
+      width: reg.width,
+      opacity: reg.opacity,
     };
   };
 
-  // When seed changes, replace elements (a fresh page).
+  // Replace graph on seed change.
   useEffect(() => {
     nodeIndex.current = new Map();
-    const els = [];
+    linkIndex.current = new Set();
+    const nodes = [];
+    const links = [];
     for (const n of seed.nodes || []) {
-      els.push(buildNodeEl(n));
+      nodes.push(buildNode(n));
       nodeIndex.current.set(n.data.id, n);
     }
+    const seenLinks = new Set();
     for (const e of seed.edges || []) {
-      els.push(buildEdgeEl(e));
+      const key = `${e.data.source}->${e.data.target}:${e.data.label}`;
+      if (seenLinks.has(key)) continue;
+      seenLinks.add(key);
+      linkIndex.current.add(e.data.id);
+      links.push(buildLink(e));
     }
-    setElements(els);
+    setGraphData({ nodes, links });
   }, [seed]);
 
   const mergeIn = useCallback((incoming) => {
-    setElements(prev => {
-      const seen = new Set(prev.map(el => el.data.id));
-      const out = prev.slice();
+    setGraphData(prev => {
+      const seen = new Set(prev.nodes.map(n => n.id));
+      const linkSeen = new Set(prev.links.map(l => `${typeof l.source === "object" ? l.source.id : l.source}->${typeof l.target === "object" ? l.target.id : l.target}:${l.label}`));
+      const nodes = prev.nodes.slice();
+      const links = prev.links.slice();
       for (const n of incoming.nodes || []) {
         if (seen.has(n.data.id)) continue;
-        out.push(buildNodeEl(n));
+        nodes.push(buildNode(n));
         nodeIndex.current.set(n.data.id, n);
         seen.add(n.data.id);
       }
       for (const e of incoming.edges || []) {
-        if (seen.has(e.data.id)) continue;
-        out.push(buildEdgeEl(e));
-        seen.add(e.data.id);
+        const key = `${e.data.source}->${e.data.target}:${e.data.label}`;
+        if (linkSeen.has(key)) continue;
+        linkSeen.add(key);
+        links.push(buildLink(e));
       }
-      return out;
+      return { nodes, links };
     });
   }, []);
 
@@ -818,7 +677,13 @@ function App() {
     if (!picked) return;
     setExpanding(true);
     try {
-      const r = await fetch(`${API}/graph/expand?id=${encodeURIComponent(picked)}&direction=${direction}&limit=80`);
+      const params = new URLSearchParams();
+      params.set("id", picked);
+      params.set("direction", direction);
+      params.set("limit", "80");
+      if (etaApplied?.origin) params.set("eta_origin", etaApplied.origin);
+      if (etaApplied?.max_minutes != null) params.set("eta_max_minutes", String(etaApplied.max_minutes));
+      const r = await fetch(`${API}/graph/expand?${params}`);
       const d = await r.json();
       mergeIn(d);
     } catch (e) {
@@ -826,38 +691,72 @@ function App() {
     } finally {
       setExpanding(false);
     }
-  }, [picked, mergeIn]);
+  }, [picked, mergeIn, etaApplied]);
 
   const onSearchPick = useCallback((n) => {
     nodeIndex.current.set(n.data.id, n);
     mergeIn({ nodes: [n], edges: [] });
     setPicked(n.data.id);
-    // Auto-expand 1 hop so search results aren't isolated dots.
     setTimeout(() => {
       fetch(`${API}/graph/expand?id=${encodeURIComponent(n.data.id)}&direction=both&limit=40`)
         .then(r => r.json()).then(mergeIn).catch(() => {});
     }, 50);
   }, [mergeIn]);
 
+  // Region rows: unique sido (with counts).
+  const sidoList = useMemo(() => {
+    const sums = new Map();
+    for (const r of facets.regions || []) {
+      if (!r.sido) continue;
+      sums.set(r.sido, (sums.get(r.sido) || 0) + (r.count || 0));
+    }
+    return Array.from(sums.entries()).map(([sido, count]) => ({ sido, count })).sort((a, b) => b.count - a.count);
+  }, [facets]);
+
+  // Sigungu sublist for the picked sido.
+  const sigunguList = useMemo(() => {
+    if (!selectedSido) return [];
+    return (facets.regions || [])
+      .filter(r => r.sido === selectedSido && r.sigungu)
+      .map(r => ({ sigungu: r.sigungu, count: r.count || 0 }))
+      .sort((a, b) => b.count - a.count);
+  }, [facets, selectedSido]);
+
+  // Concept chips: top-30 categories + top-20 facilities. Falls back to
+  // concepts/concept_axes if categories/facilities aren't present in /facets
+  // (the current /facets returns concept_axes + concepts, not categories).
+  const conceptChips = useMemo(() => {
+    const cats = (facets.categories && facets.categories.length ? facets.categories : []).slice(0, 30);
+    const facs = (facets.facilities && facets.facilities.length ? facets.facilities : []).slice(0, 20);
+    if (cats.length || facs.length) {
+      return [
+        ...cats.map(c => ({ name: c.name, count: c.count, group: "category" })),
+        ...facs.map(f => ({ name: f.name, count: f.count, group: "facility" })),
+      ];
+    }
+    // Fallback — concept_axes + top concepts (current /facets shape).
+    const axes = (facets.concept_axes || []).slice(0, 20).map(c => ({ name: c.name, count: c.count, group: "axis" }));
+    const concepts = (facets.concepts || []).slice(0, 30).map(c => ({ name: c.name, count: c.count, group: "concept" }));
+    return [...axes, ...concepts];
+  }, [facets]);
+
   const labelsCfg = schema.labels || [];
   const edgesCfg = schema.edges || [];
 
-  // Label chip click = toggle focus on that label. When focused, only the
-  // label's nodes + their 1-hop neighbors stay full opacity; rest dim.
-  // Click same chip again to clear.
-  const onLabelChipClick = (name) => {
-    setFocusLabel(prev => prev === name ? null : name);
-  };
-  const toggleEdge = (name) => {
-    setHiddenEdges(prev => {
-      const s = new Set(prev);
-      if (s.has(name)) s.delete(name); else s.add(name);
-      return s;
-    });
-  };
-  const hiddenLabels = useMemo(() => new Set(), []);   // not user-controlled here
+  const pickedNodeRaw = picked ? (nodeIndex.current.get(picked) || null) : null;
+  const pickedNode = pickedNodeRaw ? { id: pickedNodeRaw.data.id, label: pickedNodeRaw.data.label, props: pickedNodeRaw.data.props } : null;
 
-  const pickedNode = picked ? (nodeIndex.current.get(picked) || null) : null;
+  const onApplyEta = useCallback(() => {
+    const max = minutesFrom(etaHours, etaMins);
+    if (!etaOrigin.trim() || max <= 0) return;
+    setEtaApplied({ origin: etaOrigin.trim(), max_minutes: max });
+    setEtaActive(true);
+  }, [etaOrigin, etaHours, etaMins]);
+
+  const onClearEta = useCallback(() => {
+    setEtaApplied(null);
+    setEtaActive(false);
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -877,7 +776,7 @@ function App() {
             </svg>
             <div>
               <div className="text-[10px] uppercase tracking-[0.3em] text-stone-500 font-medium">camfit-puller</div>
-              <h1 className="display text-2xl font-bold leading-none mt-0.5">지식그래프</h1>
+              <h1 className="display text-2xl font-bold leading-none mt-0.5">지식그래프 · 3D</h1>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -887,7 +786,7 @@ function App() {
         </div>
 
         <div className="max-w-[1500px] mx-auto px-6 pb-4 space-y-2.5">
-          {/* Labels — chip click = focus that label, ☑ = name visible */}
+          {/* Schema chips — labels (count badges) */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">노드</span>
             {labelsCfg.length === 0 && (
@@ -896,128 +795,164 @@ function App() {
             {labelsCfg.map(l => {
               const reg = NODE_REGISTRY[l.name];
               const color = (reg && reg.color && reg.color !== "#f4f1e8") ? reg.color : tagHue(l.name);
-              const isFocused = focusLabel === l.name;
-              const dim = focusLabel != null && !isFocused;
-              const nameVisible = labelVisible.has(l.name);
               return (
-                <span key={l.name} className="inline-flex items-center gap-1">
-                  <button
-                    onClick={() => onLabelChipClick(l.name)}
-                    className={`chip ${dim ? "off" : ""}`}
-                    style={{
-                      background: color + (isFocused ? "30" : "1a"),
-                      color: color,
-                      borderColor: color + (isFocused ? "aa" : "55"),
-                      boxShadow: isFocused ? `inset 0 0 0 2px ${color}` : null,
-                    }}
-                    title={`${l.count.toLocaleString()}개 · ${isFocused ? "집중 해제하기" : "이 라벨 + 이웃만 부각"}`}>
-                    {isFocused ? "◉ " : "○ "}{l.name}<span className="opacity-60 ml-1 num">{l.count}</span>
-                  </button>
-                  <label
-                    className="text-[10px] text-stone-500 cursor-pointer select-none"
-                    title="이 라벨의 노드 이름 표시 토글">
-                    <input
-                      type="checkbox"
-                      checked={nameVisible}
-                      onChange={() => {
-                        setLabelVisible(prev => {
-                          const next = new Set(prev);
-                          if (next.has(l.name)) next.delete(l.name);
-                          else next.add(l.name);
-                          return next;
-                        });
-                      }}
-                      className="accent-stone-700 mr-0.5 align-middle"
-                    />
-                    이름
-                  </label>
+                <span key={l.name} className="chip" style={{ background: color + "1a", color, borderColor: color + "55" }} title={`${l.count.toLocaleString()}개`}>
+                  ○ {l.name}<span className="opacity-60 ml-1 num">{l.count}</span>
                 </span>
               );
             })}
-            {focusLabel && (
-              <button onClick={() => setFocusLabel(null)} className="text-[11px] text-stone-500 hover:text-stone-900 underline-offset-2 hover:underline ml-1">
-                ✕ 집중 해제
-              </button>
-            )}
           </div>
 
-          {/* Edges — toggle visibility (dim entirely when off) */}
+          {/* Schema chips — edges */}
           {edgesCfg.length > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">엣지</span>
               {edgesCfg.map(e => {
                 const reg = EDGE_REGISTRY[e.name];
                 const color = (reg && reg.color) || tagHue(e.name);
-                const off = hiddenEdges.has(e.name);
                 return (
-                  <button key={e.name}
-                    onClick={() => toggleEdge(e.name)}
-                    className={`chip ${off ? "off" : ""}`}
-                    style={{ background: color + "12", color: color, borderColor: color + "33", boxShadow: off ? null : `inset 0 0 0 1.5px ${color}` }}
-                    title={`${e.count.toLocaleString()}개 · ${off ? "보이기" : "숨기기"}`}>
-                    {off ? "○ " : "● "}{e.name}<span className="opacity-60 ml-1 num">{e.count}</span>
+                  <span key={e.name} className="chip" style={{ background: color + "12", color, borderColor: color + "33" }} title={`${e.count.toLocaleString()}개`}>
+                    ● {e.name}<span className="opacity-60 ml-1 num">{e.count}</span>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Region row — sido (and sigungu sub-chips when sido picked) */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">지역</span>
+            <button
+              onClick={() => { setSelectedSido(null); setSelectedSigungu(null); }}
+              className={`chip ${!selectedSido ? "" : "off"}`}
+              style={!selectedSido ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
+              전체
+            </button>
+            {sidoList.map(s => {
+              const active = selectedSido === s.sido;
+              return (
+                <button key={s.sido}
+                  onClick={() => { setSelectedSido(active ? null : s.sido); setSelectedSigungu(null); }}
+                  className={`chip ${active ? "" : "off"}`}
+                  style={active ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}
+                  title={`${s.count.toLocaleString()}곳`}>
+                  {s.sido}<span className="opacity-60 ml-1 num">{s.count}</span>
+                </button>
+              );
+            })}
+          </div>
+          {selectedSido && sigunguList.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap pl-3">
+              <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">시·군·구</span>
+              <button
+                onClick={() => setSelectedSigungu(null)}
+                className={`chip ${!selectedSigungu ? "" : "off"}`}
+                style={!selectedSigungu ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
+                전체
+              </button>
+              {sigunguList.map(s => {
+                const active = selectedSigungu === s.sigungu;
+                return (
+                  <button key={s.sigungu}
+                    onClick={() => setSelectedSigungu(active ? null : s.sigungu)}
+                    className={`chip ${active ? "" : "off"}`}
+                    style={active ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
+                    {s.sigungu}<span className="opacity-60 ml-1 num">{s.count}</span>
                   </button>
                 );
               })}
             </div>
           )}
 
-          {/* Layout + limit */}
+          {/* Concept row */}
+          {conceptChips.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">카테고리·시설</span>
+              <button
+                onClick={() => setSelectedConcept(null)}
+                className={`chip ${!selectedConcept ? "" : "off"}`}
+                style={!selectedConcept ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
+                전체
+              </button>
+              {conceptChips.map(c => {
+                const active = selectedConcept === c.name;
+                const color = c.group === "facility" ? "#2c6e7b" : tagHue(c.name);
+                return (
+                  <button key={c.group + ":" + c.name}
+                    onClick={() => setSelectedConcept(active ? null : c.name)}
+                    className={`chip ${active ? "" : "off"}`}
+                    style={{ background: color + "14", color, borderColor: color + "33", boxShadow: active ? `inset 0 0 0 1.5px ${color}` : null }}>
+                    {prettyTag(c.name)}<span className="opacity-60 ml-1 num">{c.count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ETA row */}
+          <EtaBar
+            origin={etaOrigin} setOrigin={setEtaOrigin}
+            hours={etaHours} setHours={setEtaHours}
+            mins={etaMins} setMins={setEtaMins}
+            etaActive={etaActive} setEtaActive={(v) => {
+              setEtaActive(v);
+              if (!v) setEtaApplied(null);
+            }}
+            onApply={onApplyEta} onClear={onClearEta}
+            loading={loading}
+          />
+
+          {/* Dimension toggle + seed limit */}
           <div className="flex items-center gap-3 flex-wrap pt-1">
-            <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500">레이아웃</span>
+            <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500">차원</span>
             <div className="flex gap-1">
               {[
-                { id: "region-tree",  label: "지역 트리" },
-                { id: "cose-bilkent", label: "force" },
-                { id: "concentric",   label: "동심원" },
+                { id: "3d", label: "3D" },
+                { id: "2d", label: "2D" },
               ].map(opt => (
                 <button key={opt.id}
-                  onClick={() => setLayoutName(opt.id)}
-                  className={`chip ${layoutName === opt.id ? "" : "off"}`}
-                  style={layoutName === opt.id ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
+                  onClick={() => setDimensions(opt.id)}
+                  className={`chip ${dimensions === opt.id ? "" : "off"}`}
+                  style={dimensions === opt.id ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
                   {opt.label}
                 </button>
               ))}
             </div>
             <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 ml-3">시드 limit</span>
             <div className="flex gap-1">
-              {[50, 100, 200, 500].map(v => (
+              {[200, 1000, 5000, 10000, 50000].map(v => (
                 <button key={v}
                   onClick={() => setLimit(v)}
                   className={`chip ${limit === v ? "" : "off"}`}
                   style={limit === v ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
-                  <span className="num">{v}</span>
+                  <span className="num">{v.toLocaleString()}</span>
                 </button>
               ))}
             </div>
             <button className="btn ml-auto" onClick={() => setReloadKey(k => k + 1)} title="새 시드 페치">↻ 새로고침</button>
             <span className="text-[11px] text-stone-500 num">
-              {loading ? "불러오는 중…" : `${elements.filter(e => e.group === "nodes").length} 노드 · ${elements.filter(e => e.group === "edges").length} 엣지`}
+              {loading ? "불러오는 중…" : `${graphData.nodes.length.toLocaleString()} 노드 · ${graphData.links.length.toLocaleString()} 엣지`}
             </span>
           </div>
-          {(err || schemaErr) && (
-            <div className="text-[11px] text-[color:var(--ember)]">API: {err || schemaErr}</div>
+          {(err || schemaErr || facetsErr) && (
+            <div className="text-[11px] text-[color:var(--ember)]">API: {err || schemaErr || facetsErr}</div>
           )}
         </div>
       </header>
 
       <main className="flex-1 max-w-[1500px] w-full mx-auto px-6 py-5">
-        <section style={{ height: "calc(100vh - 270px)", minHeight: 480 }}>
+        <section style={{ height: "calc(100vh - 360px)", minHeight: 480 }}>
           <GraphCanvas
-            elements={elements}
-            layoutName={layoutName}
-            hiddenLabels={hiddenLabels}
-            hiddenEdges={hiddenEdges}
+            graphData={graphData}
+            dimensions={dimensions}
             onPick={setPicked}
             focusedId={picked}
-            labelVisible={labelVisible}
-            focusLabel={focusLabel}
           />
         </section>
       </main>
 
       <footer className="border-t hairline text-[11px] text-stone-500 px-6 py-3 flex items-center justify-between">
-        <span>FalkorDB · 지식그래프 시각화 · cytoscape.js</span>
+        <span>FalkorDB · 지식그래프 · 3d-force-graph (Three.js · WebGL)</span>
         <span className="num">단축키: <span className="kbd">esc</span> 패널 닫기</span>
       </footer>
 
@@ -1033,7 +968,6 @@ function App() {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    // Best-effort close; React state lives in App so we trigger a click on the close btn.
     const btn = document.querySelector(".fixed.inset-y-0.right-0 .btn");
     if (btn) btn.click();
   }

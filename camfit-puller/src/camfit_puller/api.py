@@ -459,24 +459,66 @@ def _primary_text_key(label: str) -> str:
 @app.get("/graph/sample")
 def graph_sample(
     labels: Optional[str] = Query(None, description="comma-separated label filter; empty = all"),
-    limit: int = Query(200, ge=1, le=2000),
+    limit: int = Query(200, ge=1, le=100000),
+    sido: Optional[str] = Query(None, description="filter Camps to this sido (region anchor)"),
+    sigungu: Optional[str] = Query(None, description="filter Camps to this sigungu"),
+    concept: Optional[str] = Query(None, description="filter Camps that have a HAS_CATEGORY|HAS_FACILITY edge to a node with name=$concept"),
+    eta_origin: Optional[str] = Query(None, description="ETA origin (e.g. '강남역'); resolved per Camp"),
+    eta_max_minutes: Optional[int] = Query(None, ge=1, le=1440, description="drop Camp nodes whose drive ETA exceeds this"),
 ) -> dict:
     """Seed graph — first $limit (node, edge, neighbor) tuples where the
     primary node matches the label filter (or any label if unfiltered).
 
-    Note on Cypher pattern: FalkorDB has a quirk where ``MATCH (n) WITH n
-    LIMIT k OPTIONAL MATCH (n)-[r]-(m)`` only returns one row per `n` even
-    when n has multiple neighbors — so we MATCH the (n,r,m) tuples directly
-    and LIMIT at the RETURN, which gives proper edge expansion.
+    When any of `sido`/`sigungu`/`concept` are present, the query becomes
+    Camp-anchored: pick `$limit` Camps satisfying the filters, then expand
+    their full neighborhoods. When unfiltered, the legacy pattern is used.
+
+    When `eta_origin` + `eta_max_minutes` are both present, Camp nodes are
+    additionally pruned post-query: each Camp is resolved to its drive ETA
+    (using its address/sido+sigungu+name) and dropped if minutes exceed the
+    cap. Camps without lat/lon (no place name resolvable) are also dropped.
+    Edges adjacent to dropped Camps are dropped too.
 
     Edges are deduplicated by (source_id, target_id, rel_type) as a safety
     net (FalkorDB currently returns each undirected edge once, but the dedup
     keeps the contract stable across versions).
     """
     label_list = _parse_labels(labels)
+    has_camp_filter = bool(sido or sigungu or concept)
     try:
         g = _falkor()
-        if label_list:
+        if has_camp_filter:
+            # Camp-anchored: collect Camps matching all provided sub-filters,
+            # LIMIT to $limit, then expand neighborhoods.
+            where_clauses: list[str] = []
+            params: dict[str, Any] = {"limit": limit}
+            extra_match: list[str] = []
+            if sido or sigungu:
+                extra_match.append("MATCH (c)-[:LOCATED_IN]->(reg:Region)")
+                if sido:
+                    where_clauses.append("reg.sido = $sido")
+                    params["sido"] = sido
+                if sigungu:
+                    where_clauses.append("reg.sigungu = $sigungu")
+                    params["sigungu"] = sigungu
+            if concept:
+                extra_match.append("MATCH (c)-[:HAS_CATEGORY|HAS_FACILITY]->(con)")
+                where_clauses.append("con.name = $concept")
+                params["concept"] = concept
+            where = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+            cy = (
+                "MATCH (c:Camp) "
+                + " ".join(extra_match)
+                + where
+                + " WITH DISTINCT c LIMIT $limit "
+                "OPTIONAL MATCH (c)-[r]-(m) "
+                "RETURN labels(c)[0] AS l_n, properties(c) AS p_n, "
+                "       type(r) AS r_t, "
+                "       CASE WHEN startNode(r) = c THEN 'out' ELSE 'in' END AS r_dir, "
+                "       labels(m)[0] AS l_m, properties(m) AS p_m"
+            )
+            rs = g.query(cy, params=params).result_set
+        elif label_list:
             cy = (
                 "MATCH (n)-[r]-(m) WHERE labels(n)[0] IN $labels "
                 "RETURN labels(n)[0] AS l_n, properties(n) AS p_n, "
@@ -485,7 +527,8 @@ def graph_sample(
                 "       labels(m)[0] AS l_m, properties(m) AS p_m "
                 "LIMIT $limit"
             )
-            params: dict[str, Any] = {"labels": label_list, "limit": limit}
+            params = {"labels": label_list, "limit": limit}
+            rs = g.query(cy, params=params).result_set
         else:
             cy = (
                 "MATCH (n)-[r]-(m) "
@@ -496,22 +539,81 @@ def graph_sample(
                 "LIMIT $limit"
             )
             params = {"limit": limit}
-        rs = g.query(cy, params=params).result_set
+            rs = g.query(cy, params=params).result_set
     except Exception as e:
         return _empty_graph(f"falkor: {type(e).__name__}")
+
+    # ETA filter (post-query): drop Camp ids exceeding the budget.
+    eta_keep: Optional[set[str]] = None
+    eta_warning: Optional[str] = None
+    if eta_origin and eta_max_minutes is not None:
+        try:
+            camp_props_by_id: dict[str, dict] = {}
+            for row in rs:
+                l_n, p_n, _r_t, _r_dir, l_m, p_m = row
+                if l_n == "Camp" and p_n:
+                    cid = p_n.get("id")
+                    if cid:
+                        camp_props_by_id[str(cid)] = p_n
+                if l_m == "Camp" and p_m:
+                    cid = p_m.get("id")
+                    if cid:
+                        camp_props_by_id[str(cid)] = p_m
+
+            keep: set[str] = set()
+            if camp_props_by_id:
+                # Build place names from Camp props (mirrors EtaForFleet._place_for):
+                # prefer "sido sigungu", fall back to address, then name.
+                pairs: list[tuple[str, str]] = []
+                for cid, props in camp_props_by_id.items():
+                    sido_p = (props.get("sido") or "").strip()
+                    sigungu_p = (props.get("sigungu") or "").strip()
+                    region = " ".join(filter(None, [sido_p, sigungu_p])).strip()
+                    place: Optional[str] = None
+                    if region and "(미지정)" not in region:
+                        place = region
+                    elif (props.get("address") or "").strip():
+                        place = props["address"].strip()
+                    elif (props.get("name") or "").strip():
+                        place = props["name"].strip()
+                    # Camps with no resolvable place + no lat/lon: drop.
+                    if place and (props.get("lat") is not None and props.get("lon") is not None):
+                        pairs.append((cid, place))
+                if pairs:
+                    raw = _container.eta.drive_eta_batch(
+                        eta_origin, pairs, concurrency=4, timeout_s=12.0,
+                    )
+                    for cid, r in raw.items():
+                        if r.minutes is not None and r.minutes <= eta_max_minutes:
+                            keep.add(cid)
+            eta_keep = keep
+        except Exception as e:
+            # Non-fatal: surface as warning, leave eta_keep=None (no filtering).
+            eta_warning = f"eta: {type(e).__name__}: {e}"
+            eta_keep = None
+
+    def _camp_dropped(label: str, props: dict) -> bool:
+        if eta_keep is None:
+            return False
+        if label != "Camp":
+            return False
+        cid = (props or {}).get("id")
+        return str(cid) not in eta_keep if cid is not None else True
 
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
     edge_seen: set[tuple[str, str, str]] = set()
     for row in rs:
         l_n, p_n, r_t, r_dir, l_m, p_m = row
-        if l_n:
+        n_drop = _camp_dropped(l_n, p_n or {})
+        m_drop = _camp_dropped(l_m, p_m or {}) if l_m else False
+        if l_n and not n_drop:
             el = _node_element(l_n, p_n or {})
             nodes[el["data"]["id"]] = el
-        if l_m:
+        if l_m and not m_drop:
             el = _node_element(l_m, p_m or {})
             nodes[el["data"]["id"]] = el
-        if r_t and l_n and l_m:
+        if r_t and l_n and l_m and not n_drop and not m_drop:
             if r_dir == "out":
                 src_label, src_props, dst_label, dst_props = l_n, p_n or {}, l_m, p_m or {}
             else:
@@ -523,7 +625,11 @@ def graph_sample(
                 continue
             edge_seen.add(key)
             edges.append(_edge_element(r_t, src_props, dst_props, src_label, dst_label, len(edges)))
-    return {"nodes": list(nodes.values()), "edges": edges}
+    headers = {"X-Warning": eta_warning} if eta_warning else None
+    body = {"nodes": list(nodes.values()), "edges": edges}
+    if headers:
+        return JSONResponse(body, status_code=200, headers=headers)
+    return body
 
 
 @app.get("/graph/expand")
@@ -531,8 +637,14 @@ def graph_expand(
     id: str = Query(..., description="cytoscape node id, e.g. 'Camp:abc'"),
     direction: str = Query("both", pattern="^(in|out|both)$"),
     limit: int = Query(60, ge=1, le=500),
+    eta_origin: Optional[str] = Query(None, description="ETA origin (e.g. '강남역'); resolved per Camp neighbor"),
+    eta_max_minutes: Optional[int] = Query(None, ge=1, le=1440, description="drop Camp neighbors whose drive ETA exceeds this"),
 ) -> dict:
-    """Fetch neighbors of one node (by synthetic id). Returns the source node + neighbors + edges."""
+    """Fetch neighbors of one node (by synthetic id). Returns the source node + neighbors + edges.
+
+    Optional `eta_origin`+`eta_max_minutes` filters Camp neighbors post-query
+    (same semantic as /graph/sample).
+    """
     label, natural = _parse_node_id(id)
     if not label or not natural:
         return _empty_graph("invalid id")
@@ -560,22 +672,80 @@ def graph_expand(
     except Exception as e:
         return _empty_graph(f"falkor: {type(e).__name__}")
 
+    # ETA filter (post-query): drop Camp ids exceeding budget. Same logic as /graph/sample.
+    eta_keep: Optional[set[str]] = None
+    eta_warning: Optional[str] = None
+    if eta_origin and eta_max_minutes is not None:
+        try:
+            camp_props_by_id: dict[str, dict] = {}
+            for row in rs:
+                l_n, p_n, _r_t, _r_dir, l_m, p_m = row
+                if l_n == "Camp" and p_n:
+                    cid = p_n.get("id")
+                    if cid:
+                        camp_props_by_id[str(cid)] = p_n
+                if l_m == "Camp" and p_m:
+                    cid = p_m.get("id")
+                    if cid:
+                        camp_props_by_id[str(cid)] = p_m
+            keep: set[str] = set()
+            if camp_props_by_id:
+                pairs: list[tuple[str, str]] = []
+                for cid, props in camp_props_by_id.items():
+                    sido_p = (props.get("sido") or "").strip()
+                    sigungu_p = (props.get("sigungu") or "").strip()
+                    region = " ".join(filter(None, [sido_p, sigungu_p])).strip()
+                    place: Optional[str] = None
+                    if region and "(미지정)" not in region:
+                        place = region
+                    elif (props.get("address") or "").strip():
+                        place = props["address"].strip()
+                    elif (props.get("name") or "").strip():
+                        place = props["name"].strip()
+                    if place and (props.get("lat") is not None and props.get("lon") is not None):
+                        pairs.append((cid, place))
+                if pairs:
+                    raw = _container.eta.drive_eta_batch(
+                        eta_origin, pairs, concurrency=4, timeout_s=12.0,
+                    )
+                    for cid, r in raw.items():
+                        if r.minutes is not None and r.minutes <= eta_max_minutes:
+                            keep.add(cid)
+            eta_keep = keep
+        except Exception as e:
+            eta_warning = f"eta: {type(e).__name__}: {e}"
+            eta_keep = None
+
+    def _camp_dropped(lbl: str, props: dict) -> bool:
+        if eta_keep is None:
+            return False
+        if lbl != "Camp":
+            return False
+        cid = (props or {}).get("id")
+        return str(cid) not in eta_keep if cid is not None else True
+
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
     for i, row in enumerate(rs):
         l_n, p_n, r_t, r_dir, l_m, p_m = row
-        if l_n:
+        n_drop = _camp_dropped(l_n, p_n or {})
+        m_drop = _camp_dropped(l_m, p_m or {}) if l_m else False
+        if l_n and not n_drop:
             el = _node_element(l_n, p_n or {})
             nodes[el["data"]["id"]] = el
-        if l_m:
+        if l_m and not m_drop:
             el = _node_element(l_m, p_m or {})
             nodes[el["data"]["id"]] = el
-        if r_t and l_n and l_m:
+        if r_t and l_n and l_m and not n_drop and not m_drop:
             if r_dir == "out":
                 edges.append(_edge_element(r_t, p_n or {}, p_m or {}, l_n, l_m, i))
             else:
                 edges.append(_edge_element(r_t, p_m or {}, p_n or {}, l_m, l_n, i))
-    return {"nodes": list(nodes.values()), "edges": edges}
+    headers = {"X-Warning": eta_warning} if eta_warning else None
+    body = {"nodes": list(nodes.values()), "edges": edges}
+    if headers:
+        return JSONResponse(body, status_code=200, headers=headers)
+    return body
 
 
 @app.get("/graph/search")
