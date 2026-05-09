@@ -101,9 +101,9 @@
   }
   .pin-cluster.lg { width: 46px; height: 46px; font-size: 14px; }
   .pin-pin {
-    width: 14px; height: 14px; border-radius: 999px;
-    background: var(--moss); border: 2px solid #f7f4e8;
-    box-shadow: 0 1px 3px rgba(26,26,23,0.3);
+    width: 20px; height: 20px; border-radius: 999px;
+    background: var(--moss); border: 2.5px solid #f7f4e8;
+    box-shadow: 0 1.5px 4px rgba(26,26,23,0.32);
   }
   /* One color per featured-axis id. Order matches FEATURED_AXES — when
      adding a new axis, paste its id here with a hex. Default (.pin-pin
@@ -464,7 +464,7 @@ function MapView({ rows, onPick, focused, etaMap, axes, userLoc }) {
       spiderfyOnMaxZoom: true,
       // Tighter merge — default 80px clumps neighbouring camps too eagerly.
       // 35px keeps only true overlaps merged so individual pins stay visible.
-      maxClusterRadius: 35,
+      maxClusterRadius: 18,
       // Past zoom 12 (city-level), drop clustering entirely. Each camp gets
       // its own pin — useful when zooming into a popular sigungu.
       disableClusteringAtZoom: 12,
@@ -504,9 +504,9 @@ function MapView({ rows, onPick, focused, etaMap, axes, userLoc }) {
       const m = L.marker([r.lat, r.lon], {
         icon: L.divIcon({
           className: "",
-          html: `<div class="pin-pin ${tone}" style="width:14px;height:14px;"></div>`,
-          iconSize: [14, 14],
-          iconAnchor: [7, 7],
+          html: `<div class="pin-pin ${tone}" style="width:20px;height:20px;"></div>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10],
         }),
         title: r.name,
       });
