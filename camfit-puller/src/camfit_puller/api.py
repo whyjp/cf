@@ -95,7 +95,7 @@ def site_search(q: str = Query(..., min_length=1), k: int = 20) -> list[dict]:
     if not q.strip():
         return []
     camps = _container.semantic_search().execute(q.strip(), k=max(1, min(k, 100)))
-    return [c.model_dump() for c in camps]
+    return [_camp_to_fe_row(c) for c in camps]
 
 
 @app.get("/sites/{site_id}/similar")
@@ -107,7 +107,7 @@ def site_similar(site_id: str, k: int = 10) -> list[dict]:
     hits = _container.vector.knn(vec, k=k + 1)  # +1 to exclude self
     other_ids = [cid for cid, _ in hits if cid != site_id][:k]
     by_id = {c.id: c for c in _container.camps_read.list_filtered(ids=other_ids)}
-    return [by_id[cid].model_dump() for cid in other_ids if cid in by_id]
+    return [_camp_to_fe_row(by_id[cid]) for cid in other_ids if cid in by_id]
 
 
 @app.get("/sites/{site_id}")
@@ -169,25 +169,33 @@ def _camp_to_fe_row(c) -> dict:
 
     The map view in fe/index.html reads `r.lat`/`r.lon`/`r.sido` directly
     (no `.geo.lat` traversal), and the chip rendering iterates `r.categories`.
-    The legacy boolean axis flags `has_valley`/`has_kids`/`has_trampoline`
-    are derived from collections+facilities until the concept-aggregated
-    matview drives them through `/sites?concept=...`.
+
+    The legacy boolean axis flags `has_valley`/`has_kids`/`has_trampoline` are
+    derived by checking, in priority order:
+      1. `location_types` (camfit's structured terrain tag — `valley`/`mountain`/...)
+      2. `facilities` and `additional_facilities` (English codes — `trampoline`/`swimmingPool`/...)
+      3. `collections` + `types` (Korean editorial buckets — `콜렉션:키즈캠핑장`)
+      4. `hashtags` (free-form — `계곡캠핑장`/`키즈캠핑장`)
+
+    A keyword that appears as either its English code (in (1)/(2)) OR its
+    Korean variant (in (3)/(4)) lights up the flag. False-positive risk is
+    accepted; the polarity-aware `/sites?concept=kids` will eventually
+    supersede these flags.
     """
     geo = c.geo
     region = c.region
     cats = list(c.collections or [])
     facs = list(c.facilities or []) + list(c.additional_facilities or [])
     types = list(c.types or [])
-    cat_names = cats + types  # for chip display
+    location_types = list(c.location_types or [])
+    hashtags = list(c.hashtags or [])
 
-    # Lightweight axis derivation from the union of collections/facilities/types.
-    # Any string containing the keyword wins. False-positive risk is acceptable
-    # at this layer — the authoritative source is /sites?concept=kids etc.
-    def _has(keyword: str) -> bool:
-        for s in cat_names + facs:
-            if keyword in s:
-                return True
-        return False
+    # Search corpus for the boolean axis flags — every meaningful tag source
+    # joined into one lowercased blob for substring matching.
+    haystack = " ".join(cats + types + facs + location_types + hashtags).lower()
+
+    def _matches(*needles: str) -> bool:
+        return any(n.lower() in haystack for n in needles)
 
     return {
         "id": c.id,
@@ -197,12 +205,16 @@ def _camp_to_fe_row(c) -> dict:
         "address": c.address,
         "lat": geo.lat if geo else None,
         "lon": geo.lon if geo else None,
-        "categories": cat_names,
+        # `categories` is the chip-display source. Drop opaque exhibition IDs
+        # (전시:E* — camfit's editorial bucket count >500 each, no semantic
+        # value) so the FE collection chip row surfaces meaningful tags only.
+        "categories": [s for s in (cats + types) if not s.startswith("전시:")],
         "facilities": facs,
-        "hashtags": list(c.hashtags or []),
-        "has_valley": _has("계곡"),
-        "has_kids": _has("키즈") or _has("아이"),
-        "has_trampoline": _has("트램펄린"),
+        "location_types": location_types,
+        "hashtags": hashtags,
+        "has_valley": _matches("valley", "계곡"),
+        "has_kids": _matches("kids", "키즈", "아이"),
+        "has_trampoline": _matches("trampoline", "트램펄린", "트램폴린"),
         "num_of_reviews": c.num_of_reviews,
         "bookmark_count": c.bookmark_count,
         "url": c.url,

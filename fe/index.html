@@ -417,17 +417,17 @@ function FilterBar({ filters, set, facets, rows }) {
     [facets]
   );
 
-  // Collections — derived in-FE from currently-loaded rows. Each camp's
-  // `categories` array contains "콜렉션:...", "전시:E..." and "테마:..."
-  // prefixed entries. Aggregate distinct names with counts. Independent of
-  // /facets because the server-side facets endpoint doesn't expose them.
+  // Collections — derived in-FE from currently-loaded rows. Camfit's
+  // `전시:E*` exhibition IDs are camp-pool catch-alls (>500 camps each, no
+  // semantic value) and the api.py projection already strips them, so we
+  // only see meaningful `콜렉션:*` (editorial buckets) and `테마:*` here.
   const collectionChips = useMemo(() => {
     if (!rows || rows.length === 0) return [];
     const counts = new Map();
     for (const r of rows) {
       for (const c of (r.categories || [])) {
         if (typeof c !== "string") continue;
-        if (c.startsWith("콜렉션:") || c.startsWith("전시:") || c.startsWith("테마:")) {
+        if (c.startsWith("콜렉션:") || c.startsWith("테마:")) {
           counts.set(c, (counts.get(c) || 0) + 1);
         }
       }
