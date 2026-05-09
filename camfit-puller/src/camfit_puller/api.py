@@ -113,9 +113,100 @@ def site_similar(site_id: str, k: int = 10) -> list[dict]:
 @app.get("/sites/{site_id}")
 def site_detail(site_id: str) -> dict:
     try:
-        return _container.get_site_detail().execute(site_id)
+        d = _container.get_site_detail().execute(site_id)
     except CampNotFound:
         raise HTTPException(404, f"camp not found: {site_id}")
+    # FE DetailPanel reads flat camelCase + flat region/geo. Project here so
+    # the use-case stays canonical (Camp domain shape) while the FE stays terse.
+    camp = d.get("camp") or {}
+    geo = camp.get("geo") or {}
+    region = camp.get("region") or {}
+    photos = camp.get("photos") or []
+    flat = {
+        "id": camp.get("id"),
+        "name": camp.get("name"),
+        "address": camp.get("address"),
+        "lat": geo.get("lat"),
+        "lon": geo.get("lon"),
+        "region_sido": region.get("sido"),
+        "region_sigungu": region.get("sigungu"),
+        "categories": list(camp.get("collections") or []) + list(camp.get("types") or []),
+        "facilities": list(camp.get("facilities") or []) + list(camp.get("additional_facilities") or []),
+        "hashtags": camp.get("hashtags") or [],
+        "description": camp.get("description"),
+        "brief": camp.get("brief"),
+        "locationBrief": camp.get("location_brief"),
+        "contact": camp.get("contact"),
+        "priceStartFrom": camp.get("price_start_from"),
+        "priceEndTo": camp.get("price_end_to"),
+        "numOfReviews": camp.get("num_of_reviews"),
+        "bookmarkCount": camp.get("bookmark_count"),
+        "url": camp.get("url"),
+        "photos": [
+            {"url": p.get("url"), "thumb": p.get("thumb_url") or p.get("url")}
+            for p in photos
+        ],
+        "reviews_total": d.get("reviews_total"),
+        "reviews_top": [
+            {
+                "user": r.get("user_nick"),
+                "season": r.get("season"),
+                "userType": r.get("user_type"),
+                "numOfDays": r.get("num_of_days"),
+                "score": r.get("score"),
+                "text": r.get("text"),
+            }
+            for r in (d.get("reviews_top") or [])
+        ],
+        "concepts": d.get("concepts") or [],
+        "theme": d.get("theme"),
+    }
+    return flat
+
+
+def _camp_to_fe_row(c) -> dict:
+    """FE-friendly flat projection of a Camp domain model.
+
+    The map view in fe/index.html reads `r.lat`/`r.lon`/`r.sido` directly
+    (no `.geo.lat` traversal), and the chip rendering iterates `r.categories`.
+    The legacy boolean axis flags `has_valley`/`has_kids`/`has_trampoline`
+    are derived from collections+facilities until the concept-aggregated
+    matview drives them through `/sites?concept=...`.
+    """
+    geo = c.geo
+    region = c.region
+    cats = list(c.collections or [])
+    facs = list(c.facilities or []) + list(c.additional_facilities or [])
+    types = list(c.types or [])
+    cat_names = cats + types  # for chip display
+
+    # Lightweight axis derivation from the union of collections/facilities/types.
+    # Any string containing the keyword wins. False-positive risk is acceptable
+    # at this layer — the authoritative source is /sites?concept=kids etc.
+    def _has(keyword: str) -> bool:
+        for s in cat_names + facs:
+            if keyword in s:
+                return True
+        return False
+
+    return {
+        "id": c.id,
+        "name": c.name,
+        "sido": region.sido if region else None,
+        "sigungu": region.sigungu if region else None,
+        "address": c.address,
+        "lat": geo.lat if geo else None,
+        "lon": geo.lon if geo else None,
+        "categories": cat_names,
+        "facilities": facs,
+        "hashtags": list(c.hashtags or []),
+        "has_valley": _has("계곡"),
+        "has_kids": _has("키즈") or _has("아이"),
+        "has_trampoline": _has("트램펄린"),
+        "num_of_reviews": c.num_of_reviews,
+        "bookmark_count": c.bookmark_count,
+        "url": c.url,
+    }
 
 
 @app.get("/sites")
@@ -144,7 +235,7 @@ def sites(
         min_score=min_score, max_score=max_score,
         bbox=bb, limit=limit,
     )
-    return [c.model_dump() for c in rows]
+    return [_camp_to_fe_row(c) for c in rows]
 
 
 # ───────────────────────── Facets ─────────────────────────
