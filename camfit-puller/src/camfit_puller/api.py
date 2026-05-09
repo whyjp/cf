@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from .settings import Settings
 from .container import Container
 from .domain.errors import CampNotFound
+from .domain.featured_axes import FEATURED_AXES
 
 
 _settings = Settings()
@@ -170,17 +171,12 @@ def _camp_to_fe_row(c) -> dict:
     The map view in fe/index.html reads `r.lat`/`r.lon`/`r.sido` directly
     (no `.geo.lat` traversal), and the chip rendering iterates `r.categories`.
 
-    The legacy boolean axis flags `has_valley`/`has_kids`/`has_trampoline` are
-    derived by checking, in priority order:
-      1. `location_types` (camfit's structured terrain tag — `valley`/`mountain`/...)
-      2. `facilities` and `additional_facilities` (English codes — `trampoline`/`swimmingPool`/...)
-      3. `collections` + `types` (Korean editorial buckets — `콜렉션:키즈캠핑장`)
-      4. `hashtags` (free-form — `계곡캠핑장`/`키즈캠핑장`)
-
-    A keyword that appears as either its English code (in (1)/(2)) OR its
-    Korean variant (in (3)/(4)) lights up the flag. False-positive risk is
-    accepted; the polarity-aware `/sites?concept=kids` will eventually
-    supersede these flags.
+    Boolean axis flags `has_<id>` are generated dynamically from the
+    `domain.featured_axes.FEATURED_AXES` registry — adding a new axis there
+    surfaces it on every row without further edits to this function. Each
+    axis matches case-insensitive substrings against a haystack joined from
+    every meaningful tag source plus description + brief (free-form text
+    is where seasonal/event keywords like 할로윈/단풍 actually live).
     """
     geo = c.geo
     region = c.region
@@ -200,13 +196,17 @@ def _camp_to_fe_row(c) -> dict:
     types_ko = [_TYPE_KO.get(t, t) for t in types]
 
     # Search corpus for the boolean axis flags — every meaningful tag source
-    # joined into one lowercased blob for substring matching.
-    haystack = " ".join(cats + types + facs + location_types + hashtags).lower()
+    # joined into one lowercased blob for substring matching. description+
+    # brief join is what lets 할로윈/단풍 (mostly description-bound) light up.
+    haystack = " ".join(
+        cats + types + facs + location_types + hashtags
+        + [c.description or "", c.brief or ""]
+    ).lower()
 
     def _matches(*needles: str) -> bool:
         return any(n.lower() in haystack for n in needles)
 
-    return {
+    row = {
         "id": c.id,
         "name": c.name,
         "sido": region.sido if region else None,
@@ -229,13 +229,14 @@ def _camp_to_fe_row(c) -> dict:
         "facilities": facs,
         "location_types": location_types,
         "hashtags": hashtags,
-        "has_valley": _matches("valley", "계곡"),
-        "has_kids": _matches("kids", "키즈", "아이"),
-        "has_trampoline": _matches("trampoline", "트램펄린", "트램폴린"),
         "num_of_reviews": c.num_of_reviews,
         "bookmark_count": c.bookmark_count,
         "url": c.url,
     }
+    # Dynamic has_<id> derivation from the featured-axis registry.
+    for axis in FEATURED_AXES:
+        row[f"has_{axis['id']}"] = _matches(*axis["keywords"])
+    return row
 
 
 @app.get("/sites")
@@ -265,6 +266,23 @@ def sites(
         bbox=bb, limit=limit,
     )
     return [_camp_to_fe_row(c) for c in rows]
+
+
+# ───────────────────────── Featured axes ─────────────────────
+
+@app.get("/featured-axes")
+def featured_axes() -> list[dict]:
+    """FE-facing chip metadata for the 대표축 row. The `keywords` field is
+    intentionally omitted — only id/ko/icon/tone are needed for rendering;
+    the actual matching happens server-side in `_camp_to_fe_row`.
+
+    Adding a new axis: edit `domain/featured_axes.py` and restart. The FE
+    refetches this endpoint at mount and renders the new chip automatically.
+    """
+    return [
+        {"id": a["id"], "ko": a["ko"], "icon": a["icon"], "tone": a["tone"]}
+        for a in FEATURED_AXES
+    ]
 
 
 # ───────────────────────── Facets ─────────────────────────

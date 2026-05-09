@@ -105,9 +105,15 @@
     background: var(--moss); border: 2px solid #f7f4e8;
     box-shadow: 0 1px 3px rgba(26,26,23,0.3);
   }
-  .pin-pin.valley  { background: #2c6e7b; }
-  .pin-pin.kids    { background: #c8553d; }
-  .pin-pin.tramp   { background: var(--bark); }
+  /* One color per featured-axis id. Order matches FEATURED_AXES — when
+     adding a new axis, paste its id here with a hex. Default (.pin-pin
+     alone) stays moss-green for non-featured camps. */
+  .pin-pin.valley     { background: #2c6e7b; }
+  .pin-pin.kids       { background: #c8553d; }
+  .pin-pin.trampoline { background: var(--bark); }
+  .pin-pin.halloween  { background: #ff7518; }   /* pumpkin */
+  .pin-pin.cherry     { background: #ffb7c5; }   /* sakura */
+  .pin-pin.autumn     { background: #d35400; }   /* maple */
   /* scrollbar */
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: rgba(26,26,23,0.2); border-radius: 4px; }
@@ -221,6 +227,21 @@ function useDetail(id) {
   return data;
 }
 
+function useFeaturedAxes() {
+  // GET /featured-axes once at mount → drives the 대표축 chip row, PinDots,
+  // CampList per-card chips, FEATURED_NAMES dedup, and visibleRows boolean
+  // filter loop. Empty fallback keeps the page functional if the endpoint
+  // is unreachable; the 대표축 row simply doesn't render.
+  const [axes, setAxes] = useState([]);
+  useEffect(() => {
+    fetch(`${API}/featured-axes`)
+      .then(r => r.json())
+      .then(d => setAxes(Array.isArray(d) ? d : []))
+      .catch(() => setAxes([]));
+  }, []);
+  return axes;
+}
+
 async function fetchEtaBatch({ origin, ids, max_minutes, signal }) {
   const r = await fetch(`${API}/eta/batch`, {
     method: "POST",
@@ -240,18 +261,15 @@ async function fetchEtaBatch({ origin, ids, max_minutes, signal }) {
 // Anything not in this map renders as a generic dynamic chip.
 // Add new entries here when new categories deserve dedicated visual treatment.
 // ─────────────────────────────────────────────────────────────
-const FEATURED_CATEGORY = {
-  "계곡":     { axis: "valley",     icon: "🌊", tone: "" },
-  "키즈캠핑":  { axis: "kids",      icon: "🧒", tone: "warm" },
-};
-const FEATURED_FACILITY = {
-  "트램펄린":  { axis: "trampoline", icon: "🤸", tone: "bark" },
-};
-const FEATURED_NAMES = new Set([
-  ...Object.keys(FEATURED_CATEGORY),
-  ...Object.keys(FEATURED_FACILITY),
-]);
-const FEATURED_AXIS_FOR_TAG = (tag) => FEATURED_CATEGORY[tag]?.axis || FEATURED_FACILITY[tag]?.axis || null;
+// Featured-axis chip metadata is now backend-driven via GET /featured-axes —
+// see useFeaturedAxes() below. The legacy hardcoded maps are gone; chip
+// labels and the FEATURED_NAMES dedup set are derived from the API response.
+function buildFeaturedNames(axes) {
+  // Collection/facility chip rows skip names already shown as 대표축 chips.
+  // Backend returns Korean labels; this mirror is what the dynamic-chip
+  // filter uses to avoid duplicating axis chips in the long-tail rows.
+  return new Set((axes || []).map(a => a.ko));
+}
 
 // Stable hash → palette for dynamic tags so same tag gets same color across renders.
 const PALETTE = ["#5b6c8a", "#7c5e9a", "#3f7a6a", "#9a6e3a", "#8a5b6c", "#6a8a5b"];
@@ -267,12 +285,13 @@ function prettyTag(name) {
   return name;
 }
 
-function PinDots({ row }) {
+function PinDots({ row, axes }) {
+  const list = axes || [];
   return (
     <div className="flex gap-1">
-      {row.has_valley && <span title="계곡" className="pin-pin valley" />}
-      {row.has_kids && <span title="키즈캠핑" className="pin-pin kids" />}
-      {row.has_trampoline && <span title="트램펄린" className="pin-pin tramp" />}
+      {list.map(a => row[`has_${a.id}`] && (
+        <span key={a.id} title={a.ko} className={`pin-pin ${a.id}`} />
+      ))}
     </div>
   );
 }
@@ -322,7 +341,7 @@ function Stat({ label, value, sub }) {
 // ─────────────────────────────────────────────────────────────
 // Map
 // ─────────────────────────────────────────────────────────────
-function MapView({ rows, onPick, focused, etaMap }) {
+function MapView({ rows, onPick, focused, etaMap, axes }) {
   const mapRef = useRef(null);
   const layerRef = useRef(null);
   const mapEl = useRef(null);
@@ -386,7 +405,9 @@ function MapView({ rows, onPick, focused, etaMap }) {
     layerRef.current.clearLayers();
     const valid = rows.filter(r => r.lat != null && r.lon != null);
     valid.forEach(r => {
-      const tone = r.has_valley ? "valley" : r.has_kids ? "kids" : r.has_trampoline ? "tramp" : "";
+      // Pin tone = first matching featured-axis id (rendered as `pin-pin <id>`).
+      // Falls back to "" (default moss-green pin) when no axis matches.
+      const tone = (axes || []).find(a => r[`has_${a.id}`])?.id || "";
       const m = L.marker([r.lat, r.lon], {
         icon: L.divIcon({
           className: "",
@@ -571,7 +592,7 @@ function FilterRow({ heading, set, items, onToggle, onClear, slotKey, collapsed,
   );
 }
 
-function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCounts }) {
+function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCounts, featuredAxes }) {
   // Sido list from /facets.regions (de-duplicated)
   const sidoSet = useMemo(
     () => Array.from(new Set((facets.regions || []).map(r => r.sido).filter(Boolean))).sort(),
@@ -700,8 +721,9 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
   );
 
   // Count active dimensions for the "전체 해제" button visibility.
+  const anyFeaturedAxisActive = (featuredAxes || []).some(a => filters[`has_${a.id}`]);
   const anyActive =
-    filters.has_valley || filters.has_kids || filters.has_trampoline ||
+    anyFeaturedAxisActive ||
     filters.region.size > 0 ||
     CONCEPT_FILTER_KEYS.some(k => (filters[k] && filters[k].size > 0)) ||
     filters.terrain.size > 0 || filters.collection.size > 0 ||
@@ -717,22 +739,27 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
         )}
       </div>
 
-      {/* Featured boolean axes — single-toggle shortcuts (대표축). */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">대표축</span>
-        {[
-          { k: "has_valley", label: "🌊 계곡", tone: "" },
-          { k: "has_kids", label: "🧒 키즈캠핑", tone: "warm" },
-          { k: "has_trampoline", label: "🤸 트램펄린", tone: "bark" },
-        ].map(({ k, label, tone }) => (
-          <button key={k}
-            onClick={() => setFilters(prev => ({ ...prev, [k]: !prev[k] }))}
-            className={`chip ${tone === "warm" ? "warm" : tone === "bark" ? "bark" : ""} ${filters[k] ? "" : "opacity-70 hover:opacity-100"}`}
-            style={filters[k] ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
-            {filters[k] ? "● " : ""}{label}
-          </button>
-        ))}
-      </div>
+      {/* Featured boolean axes — registry-driven single-toggle shortcuts.
+          Adding a new axis to domain/featured_axes.py surfaces it here on
+          next page load. Each `has_<id>` is a flat boolean on every row. */}
+      {featuredAxes.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">대표축</span>
+          {featuredAxes.map(a => {
+            const k = `has_${a.id}`;
+            const active = !!filters[k];
+            const toneClass = a.tone === "warm" ? "warm" : a.tone === "bark" ? "bark" : "";
+            return (
+              <button key={a.id}
+                onClick={() => setFilters(prev => ({ ...prev, [k]: !prev[k] }))}
+                className={`chip ${toneClass} ${active ? "" : "opacity-70 hover:opacity-100"}`}
+                style={active ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>
+                {active ? "● " : ""}{a.icon} {a.ko}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Region — multi-select sido */}
       <FilterRow
@@ -910,7 +937,7 @@ function FilterBar({ filters, setFilters, clearAll, facets, rows, mgmtLevelCount
 // Pattern adapted from fe/graph.html SearchBox; result shape
 // here is the flat _camp_to_fe_row dict (id/name/sido/sigungu/...).
 // ─────────────────────────────────────────────────────────────
-function SearchBox({ onPickResult }) {
+function SearchBox({ onPickResult, axes }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
@@ -978,9 +1005,7 @@ function SearchBox({ onPickResult }) {
                 <div className="text-[12.5px] truncate font-medium">{n.name || "(이름 미상)"}</div>
                 <div className="text-[10.5px] text-stone-500 truncate">
                   {(n.sido || "") + " " + (n.sigungu || "")}
-                  {n.has_valley ? " · 🌊" : ""}
-                  {n.has_kids ? " · 🧒" : ""}
-                  {n.has_trampoline ? " · 🤸" : ""}
+                  {(axes || []).map(a => n[`has_${a.id}`] ? ` · ${a.icon}` : "")}
                 </div>
               </div>
             </button>
@@ -991,7 +1016,8 @@ function SearchBox({ onPickResult }) {
   );
 }
 
-function CampList({ rows, onPick, selectedId, etaMap }) {
+function CampList({ rows, onPick, selectedId, etaMap, axes }) {
+  const featuredNames = useMemo(() => buildFeaturedNames(axes), [axes]);
   return (
     <div className="grid gap-2">
       {rows.map(r => {
@@ -1013,12 +1039,11 @@ function CampList({ rows, onPick, selectedId, etaMap }) {
                   <div className="text-[11px] text-stone-500 truncate mt-0.5">{r.address}</div>
                 )}
                 <div className="mt-1.5 flex flex-wrap gap-1 items-center">
-                  {r.has_valley && <Chip>🌊 계곡</Chip>}
-                  {r.has_kids && <Chip tone="warm">🧒 키즈</Chip>}
-                  {r.has_trampoline && <Chip tone="bark">🤸 트램펄린</Chip>}
-                  {/* Dynamic categories not already covered by featured axes */}
+                  {(axes || []).map(a => r[`has_${a.id}`] && (
+                    <Chip key={a.id} tone={a.tone}>{a.icon} {a.ko}</Chip>
+                  ))}
                   {(r.categories || [])
-                    .filter(n => !FEATURED_NAMES.has(n))
+                    .filter(n => !featuredNames.has(n))
                     .slice(0, 4)
                     .map(n => (
                       <span key={"c-" + n} className="chip"
@@ -1026,16 +1051,16 @@ function CampList({ rows, onPick, selectedId, etaMap }) {
                         {prettyTag(n)}
                       </span>
                     ))}
-                  {(r.categories || []).filter(n => !FEATURED_NAMES.has(n)).length > 4 && (
-                    <span className="text-[10px] text-stone-500">+{(r.categories || []).filter(n => !FEATURED_NAMES.has(n)).length - 4}</span>
+                  {(r.categories || []).filter(n => !featuredNames.has(n)).length > 4 && (
+                    <span className="text-[10px] text-stone-500">+{(r.categories || []).filter(n => !featuredNames.has(n)).length - 4}</span>
                   )}
-                  {!((r.has_valley || r.has_kids || r.has_trampoline) || (r.categories || []).length) && (
+                  {(axes || []).every(a => !r[`has_${a.id}`]) && (r.categories || []).length === 0 && (
                     <span className="text-[11px] text-stone-400">—</span>
                   )}
                   {eta && <EtaBadge minutes={eta.minutes} within={eta.within} error={eta.error} />}
                 </div>
               </div>
-              <PinDots row={r} />
+              <PinDots row={r} axes={axes} />
             </div>
           </div>
         );
@@ -1050,7 +1075,12 @@ function CampList({ rows, onPick, selectedId, etaMap }) {
 // ─────────────────────────────────────────────────────────────
 // Detail panel
 // ─────────────────────────────────────────────────────────────
-function DetailPanel({ id, onClose, eta }) {
+function DetailPanel({ id, onClose, eta, axes }) {
+  const axisByKo = useMemo(() => {
+    const m = new Map();
+    for (const a of (axes || [])) m.set(a.ko, a);
+    return m;
+  }, [axes]);
   const data = useDetail(id);
   if (!id) return null;
   if (!data) return (
@@ -1075,6 +1105,25 @@ function DetailPanel({ id, onClose, eta }) {
           {eta && eta.minutes != null && (
             <div className="mt-2"><EtaBadge minutes={eta.minutes} within={eta.within} error={eta.error} /></div>
           )}
+          <div className="flex flex-wrap gap-2 mt-3">
+            {data.name && (
+              <a
+                href={`https://map.naver.com/p/search/${encodeURIComponent(
+                  [data.region_sigungu, data.name].filter(Boolean).join(" ")
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn inline-block"
+                style={{ background: "#03C75A", color: "#fff", borderColor: "#03C75A" }}
+                title="네이버 지도에서 위치 확인"
+              >
+                📍 네이버 지도 ↗
+              </a>
+            )}
+            {data.url && (
+              <a href={data.url} target="_blank" rel="noopener noreferrer" className="btn btn-primary inline-block">camfit 원본 열기 ↗</a>
+            )}
+          </div>
         </div>
         <MiniMap lat={data.lat} lon={data.lon} name={data.name} />
         <div className="grid grid-cols-3 gap-3">
@@ -1119,11 +1168,12 @@ function DetailPanel({ id, onClose, eta }) {
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mb-2">카테고리</div>
             <div className="flex flex-wrap gap-1.5">
-              {cats.map(c =>
-                FEATURED_NAMES.has(c)
-                  ? <Chip key={c} tone={FEATURED_CATEGORY[c]?.tone || ""}>{(FEATURED_CATEGORY[c]?.icon || "")} {c}</Chip>
-                  : <span key={c} className="chip" style={{ background: tagHue(c) + "14", color: tagHue(c), borderColor: tagHue(c) + "33" }}>{prettyTag(c)}</span>
-              )}
+              {cats.map(c => {
+                const axis = axisByKo.get(c);
+                return axis
+                  ? <Chip key={c} tone={axis.tone}>{axis.icon} {c}</Chip>
+                  : <span key={c} className="chip" style={{ background: tagHue(c) + "14", color: tagHue(c), borderColor: tagHue(c) + "33" }}>{prettyTag(c)}</span>;
+              })}
             </div>
           </div>
         )}
@@ -1183,9 +1233,6 @@ function DetailPanel({ id, onClose, eta }) {
         )}
         {data.contact && (
           <div className="text-[12px] text-stone-600">📞 {data.contact}</div>
-        )}
-        {data.url && (
-          <a href={data.url} target="_blank" rel="noopener noreferrer" className="btn btn-primary inline-block">camfit 원본 열기 ↗</a>
         )}
       </div>
     </div>
@@ -1249,9 +1296,11 @@ function minutesFrom(h, m) { return Math.max(0, (h | 0) * 60 + (m | 0)); }
 
 function App() {
   const [view, setView] = useState("split"); // split | map | list
-  // Multi-select chip state — every dimension is a Set<string>. The boolean
-  // shortcut row (대표축) stays as 3 booleans because they're equivalent to
-  // server-side `concept=valley|kids` + `r.has_trampoline` shortcuts.
+  const featuredAxes = useFeaturedAxes();
+  // Multi-select chip state — every long-tail dimension is a Set<string>.
+  // The 대표축 row stays as one boolean per axis (`has_<id>`) because the
+  // shortcuts are independent toggles, not a multi-pick set. New axes added
+  // to the registry get their booleans created lazily on first toggle.
   const [filters, setFilters] = useState(() => ({
     region:        new Set(),       // sido values; sent server-side when size===1, else client-side
     conceptAxis:   new Set(),       // concept ids from facets.concept_axes
@@ -1267,13 +1316,14 @@ function App() {
     collection:    new Set(),       // 콜렉션:* / 테마:* in r.categories (client-side)
     facilityRaw:   new Set(),       // r.facilities raw codes (client-side, where 트램펄린 lives)
     management:    new Set(),       // mark-axis levels — bib/recommended/notable/exceptional
-    has_valley: false, has_kids: false, has_trampoline: false,
+    // has_<id> booleans for featured axes — set lazily as user toggles chips
   }));
   const clearAll = useCallback(() => {
     setFilters(prev => {
-      const next = { has_valley: false, has_kids: false, has_trampoline: false };
+      const next = {};
       for (const k of Object.keys(prev)) {
         if (prev[k] instanceof Set) next[k] = new Set();
+        else if (k.startsWith("has_")) next[k] = false;
       }
       return next;
     });
@@ -1321,9 +1371,10 @@ function App() {
   // already narrowed via region/concept/has_*/terrain/collection chips.
   const preEtaRows = useMemo(() => {
     let out = rows;
-    if (filters.has_valley) out = out.filter(r => r.has_valley);
-    if (filters.has_kids) out = out.filter(r => r.has_kids);
-    if (filters.has_trampoline) out = out.filter(r => r.has_trampoline);
+    // Featured axes — registry-driven boolean ANDs.
+    for (const a of featuredAxes) {
+      if (filters[`has_${a.id}`]) out = out.filter(r => r[`has_${a.id}`]);
+    }
     if (filters.region.size > 1) out = out.filter(r => filters.region.has(r.sido));
     if (filters.terrain.size > 0) {
       out = out.filter(r => {
@@ -1353,7 +1404,7 @@ function App() {
       });
     }
     return out;
-  }, [rows, filters, managementCampLevels]);
+  }, [rows, filters, managementCampLevels, featuredAxes]);
 
   const applyEta = useCallback(async () => {
     if (!origin.trim() || preEtaRows.length === 0) return;
@@ -1418,11 +1469,16 @@ function App() {
 
   const total = visibleRows.length;
   const withCoord = visibleRows.filter(r => r.lat != null && r.lon != null).length;
-  const counts = useMemo(() => ({
-    valley: visibleRows.filter(r => r.has_valley).length,
-    kids: visibleRows.filter(r => r.has_kids).length,
-    tramp: visibleRows.filter(r => r.has_trampoline).length,
-  }), [visibleRows]);
+  // Featured-axis counts for the header stat. Each entry is `{ko, n}`;
+  // the Stat below renders them as "ko1 ko2 ko3 / n1 n2 n3" for whatever
+  // registry currently exposes.
+  const featuredCounts = useMemo(
+    () => featuredAxes.map(a => ({
+      ko: a.ko, icon: a.icon,
+      n: visibleRows.filter(r => r[`has_${a.id}`]).length,
+    })),
+    [visibleRows, featuredAxes]
+  );
 
   // List pagination + responsive infinite scroll. Only `displayCount` rows
   // are mounted; an IntersectionObserver on a bottom sentinel grows the
@@ -1478,8 +1534,13 @@ function App() {
           <div className="hidden md:flex gap-6 items-end">
             <Stat label="총" value={total.toLocaleString()} sub="필터 적용 후" />
             <Stat label="좌표" value={`${withCoord}`} sub={total ? `${Math.round(withCoord/total*100)}%` : "—"} />
-            <Stat label="계곡 / 키즈 / 트램펄린" value={`${counts.valley} / ${counts.kids} / ${counts.tramp}`} />
-            <SearchBox onPickResult={(arr) => {
+            {featuredCounts.length > 0 && (
+              <Stat
+                label={featuredCounts.map(c => c.icon).join(" ")}
+                value={featuredCounts.map(c => c.n).join(" / ")}
+              />
+            )}
+            <SearchBox axes={featuredAxes} onPickResult={(arr) => {
               // arr is the array of search hits (or a single-item array when
               // a row was picked). Replace effective rows + fly to first.
               setSearchResults(arr);
@@ -1508,6 +1569,7 @@ function App() {
             facets={facets}
             rows={rows}
             mgmtLevelCounts={mgmtLevelCounts}
+            featuredAxes={featuredAxes}
           />
           <EtaBar
             origin={origin} setOrigin={setOrigin}
@@ -1536,6 +1598,7 @@ function App() {
               onPick={setPickedId}
               selectedId={pickedId}
               etaMap={etaMap}
+              axes={featuredAxes}
             />
             {visibleRows.length > 0 && displayCount < visibleRows.length && (
               <div ref={sentinelRef} className="text-center text-[11px] text-stone-500 py-4">
@@ -1551,7 +1614,7 @@ function App() {
         )}
         {(view === "split" || view === "map") && (
           <section className="card overflow-hidden h-full min-h-0">
-            <MapView rows={visibleRows} onPick={setPickedId} focused={focused} etaMap={etaMap} />
+            <MapView rows={visibleRows} onPick={setPickedId} focused={focused} etaMap={etaMap} axes={featuredAxes} />
           </section>
         )}
       </main>
@@ -1565,6 +1628,7 @@ function App() {
         id={pickedId}
         onClose={() => setPickedId(null)}
         eta={pickedId && etaMap ? etaMap[pickedId] : null}
+        axes={featuredAxes}
       />
     </div>
   );
