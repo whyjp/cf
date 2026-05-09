@@ -26,7 +26,12 @@ FEATURED_AXES: list[FeaturedAxis] = [
     {"id": "kids",       "ko": "키즈캠핑", "icon": "🧒", "tone": "warm",
      "keywords": ["kids", "키즈", "아이"]},
     {"id": "trampoline", "ko": "트램펄린", "icon": "🤸", "tone": "bark",
-     "keywords": ["trampoline", "트램펄린", "트램폴린"]},
+     # "방방" is the Korean colloquial standard ("방방이" via substring) — most
+     # camp reviews use it instead of the formal "트램펄린". 4 spelling
+     # variants of 트램펄린/트램폴린 are out there; cover them all.
+     "keywords": ["trampoline", "trampolin",
+                  "트램펄린", "트램폴린", "트렘펄린", "트렘폴린",
+                  "방방"]},
     {"id": "halloween",  "ko": "할로윈",   "icon": "🎃", "tone": "warm",
      "keywords": ["할로윈", "핼러윈", "핼로윈", "halloween"]},
     {"id": "cherry",     "ko": "벚꽃",     "icon": "🌸", "tone": "warm",
