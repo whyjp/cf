@@ -6,7 +6,7 @@ def test_camp_basic_construction():
     c = Camp(id="abc", name="x", region=Region(sido="강원", sigungu="평창군"))
     assert c.id == "abc"
     assert c.region.sido == "강원"
-    assert "has_valley" not in c.model_fields
+    assert "has_valley" not in Camp.model_fields
 
 
 def test_camp_no_legacy_boolean_columns():
