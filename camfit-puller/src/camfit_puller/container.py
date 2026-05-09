@@ -51,6 +51,7 @@ from .usecases.semantic_search import SemanticSearch
 from .usecases.get_site_detail import GetSiteDetail
 from .usecases.eta_for_fleet import EtaForFleet
 from .usecases.compute_marks import ComputeMarks
+from .usecases.discover_synonyms import DiscoverSynonyms
 
 
 class Container:
@@ -259,6 +260,9 @@ class Container:
 
     def compute_marks(self) -> ComputeMarks:
         return ComputeMarks(self._pg, self.mark_repo)
+
+    def discover_synonyms(self) -> DiscoverSynonyms:
+        return DiscoverSynonyms(self.camps_read, self.reviews_read, self.embedder)
 
     def close(self) -> None:
         self._pg.close()

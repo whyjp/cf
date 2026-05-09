@@ -254,6 +254,29 @@ def pipeline_marks():
     c.close()
 
 
+@pipeline_app.command("discover-synonyms")
+def pipeline_discover_synonyms(
+    axis: str = typer.Argument(..., help="featured-axis id (e.g. trampoline, halloween, valley)"),
+    top_k: int = typer.Option(50, "--top-k", help="max candidates in the report"),
+    min_cosine: float = typer.Option(0.55, "--min-cosine", help="cosine threshold for the seed"),
+    min_count: int = typer.Option(2, "--min-count", help="discard tokens that appear fewer than N times in the matched subcorpus"),
+):
+    """DiscoverSynonyms — corpus-driven keyword expansion proposal for a featured axis.
+
+    Mines descriptions+brief+reviews of camps where any current axis keyword
+    appears, extracts Korean n-grams, embeds via ko-sroberta, sorts by cosine
+    similarity to the seed keyword, and writes data/synonyms_<axis>.md for
+    human review. The report is a *recommendation* — paste manually into
+    domain/featured_axes.py to register.
+    """
+    c = _container()
+    path = c.discover_synonyms().execute(
+        axis, top_k=top_k, min_cosine=min_cosine, min_count=min_count,
+    )
+    console.print(f"[discover-synonyms] report → {path}")
+    c.close()
+
+
 @pipeline_app.command("rebuild-graph")
 def pipeline_rebuild_graph():
     """RebuildGraph — wipe FalkorDB and re-derive from PG."""
