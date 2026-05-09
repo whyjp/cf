@@ -131,7 +131,7 @@ def site_detail(site_id: str) -> dict:
         "lon": geo.get("lon"),
         "region_sido": region.get("sido"),
         "region_sigungu": region.get("sigungu"),
-        "categories": list(camp.get("collections") or []) + list(camp.get("types") or []),
+        "categories": _project_categories(camp.get("collections"), camp.get("types")),
         "facilities": list(camp.get("facilities") or []) + list(camp.get("additional_facilities") or []),
         "hashtags": camp.get("hashtags") or [],
         "description": camp.get("description"),
@@ -165,6 +165,32 @@ def site_detail(site_id: str) -> dict:
     return flat
 
 
+# English camp-type codes from camfit's source data → Korean labels.
+# Unknown codes pass through unchanged (better to surface than to drop).
+_TYPE_KO = {
+    "autoCamping": "오토캠핑", "pension": "펜션", "glamping": "글램핑",
+    "caravan": "카라반", "bungalow": "방갈로", "rental": "렌탈",
+    "carCamping": "차박", "experience": "체험", "trailer": "트레일러",
+}
+
+
+def _project_categories(collections, types) -> list[str]:
+    """Compose the FE-facing `categories` chip list from camp.collections +
+    camp.types. Three opaque crawler-discovery prefixes are dropped:
+      - 전시:E*    camfit editorial bucket IDs (>500 camps each)
+      - 시군구:*  admin-region path stamps from the crawler
+      - 검색:*    keyword-search discovery stamps
+    Camp types are translated to Korean.
+    """
+    raw = list(collections or []) + [_TYPE_KO.get(t, t) for t in (types or [])]
+    return [
+        s for s in raw
+        if not s.startswith("전시:")
+        and not s.startswith("시군구:")
+        and not s.startswith("검색:")
+    ]
+
+
 def _camp_to_fe_row(c) -> dict:
     """FE-friendly flat projection of a Camp domain model.
 
@@ -186,15 +212,6 @@ def _camp_to_fe_row(c) -> dict:
     location_types = list(c.location_types or [])
     hashtags = list(c.hashtags or [])
 
-    # Translate camfit's English camp-type codes to Korean for FE chip display.
-    # Unknown codes pass through unchanged — better to surface than to drop.
-    _TYPE_KO = {
-        "autoCamping": "오토캠핑", "pension": "펜션", "glamping": "글램핑",
-        "caravan": "카라반", "bungalow": "방갈로", "rental": "렌탈",
-        "carCamping": "차박", "experience": "체험", "trailer": "트레일러",
-    }
-    types_ko = [_TYPE_KO.get(t, t) for t in types]
-
     # Search corpus for the boolean axis flags — every meaningful tag source
     # joined into one lowercased blob for substring matching. description+
     # brief join is what lets 할로윈/단풍 (mostly description-bound) light up.
@@ -214,18 +231,7 @@ def _camp_to_fe_row(c) -> dict:
         "address": c.address,
         "lat": geo.lat if geo else None,
         "lon": geo.lon if geo else None,
-        # `categories` is the chip-display source. Three prefix families are
-        # opaque crawler-discovery stamps with no end-user value — drop them:
-        #   - 전시:E*    — camfit editorial bucket IDs (>500 camps each)
-        #   - 시군구:* — admin-region path stamps from the crawler
-        #   - 검색:*    — keyword-search discovery stamps
-        # Camp types are translated to Korean above.
-        "categories": [
-            s for s in (cats + types_ko)
-            if not s.startswith("전시:")
-            and not s.startswith("시군구:")
-            and not s.startswith("검색:")
-        ],
+        "categories": _project_categories(cats, types),
         "facilities": facs,
         "location_types": location_types,
         "hashtags": hashtags,
