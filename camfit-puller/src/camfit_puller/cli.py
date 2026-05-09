@@ -11,7 +11,6 @@ from rich.console import Console
 from . import __version__
 from .crawler import CrawlConfig, crawl
 from .csv_writer import read_rows, write_rows
-from .falkor_writer import count_summary, reset_and_load
 
 app = typer.Typer(help="camfit.co.kr 폴라이트 크롤러 + 지식그래프/PG 적재 + FE serve")
 console = Console()
@@ -48,19 +47,8 @@ def crawl_cmd(
     asyncio.run(_run())
 
 
-@app.command("load-falkor")
-def load_falkor(
-    csv_path: Path = typer.Option(Path("data/camfit.csv"), "--csv", help="입력 CSV"),
-    host: str = typer.Option("localhost", help="FalkorDB host"),
-    port: int = typer.Option(6379, help="FalkorDB port"),
-    graph: str = typer.Option("camfit", help="그래프 이름"),
-) -> None:
-    """CSV → FalkorDB 지식그래프 재구축 (graph reset + load)."""
-    recs = read_rows(csv_path)
-    camps, stmts = reset_and_load(recs, host=host, port=port, graph=graph)
-    summary = count_summary(host=host, port=port, graph=graph)
-    console.print(f"[falkor] graph '{graph}' rebuilt: {camps} camps / {stmts} statements")
-    console.print(f"[falkor] counts: {summary}")
+# NOTE: legacy `load-falkor` command removed in T36 (falkor_writer.py deleted).
+# Replaced by `pipeline rebuild-graph` use-case in T38 (CLI refactor).
 
 
 @app.command()
