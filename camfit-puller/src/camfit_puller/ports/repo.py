@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Iterable, Iterator, Literal, Optional, Protocol, runtime_checkable
-from ..domain.models import Camp, Review, Concept, Theme, CampConcept
+from ..domain.models import Camp, Review, Concept, Theme, CampConcept, Mark
 
 
 @runtime_checkable
@@ -86,3 +86,14 @@ class ReviewSignalWriter(Protocol):
     def upsert(self, camp_id: str, concept_id: str, score: float,
                pos_count: int, neg_count: int, evidence: str | None) -> None: ...
     def reset_for(self, camp_id: str) -> None: ...
+
+
+@runtime_checkable
+class MarkRepository(Protocol):
+    def replace_for_camp(self, camp_id: str, marks: list["Mark"]) -> int: ...
+    def for_camp(self, camp_id: str) -> list["Mark"]: ...
+    def for_axis(self, axis: str, *, min_level: str | None = None,
+                 limit: int = 100) -> list["Mark"]: ...
+    def all_axes(self) -> list[tuple[str, int]]:
+        """[(axis_name, count), ...] ordered by count desc."""
+        ...

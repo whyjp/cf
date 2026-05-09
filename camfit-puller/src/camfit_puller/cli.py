@@ -173,6 +173,15 @@ def pipeline_themes():
     c.close()
 
 
+@pipeline_app.command("marks")
+def pipeline_marks():
+    """ComputeMarks — Michelin-style ratings per axis from review temperature."""
+    c = _container()
+    out = c.compute_marks().execute()
+    console.print(f"[marks] {out}")
+    c.close()
+
+
 @pipeline_app.command("rebuild-graph")
 def pipeline_rebuild_graph():
     """RebuildGraph — wipe FalkorDB and re-derive from PG."""
@@ -195,6 +204,7 @@ def pipeline_run_all():
         ("extract-review", lambda c: _extract_review_all(c)),
         ("refresh-agg",    lambda c: (c.refresh_aggregated().execute() or "ok")),
         ("themes",         lambda c: c.discover_themes().execute()),
+        ("marks",          lambda c: c.compute_marks().execute()),
         ("rebuild-graph",  lambda c: c.rebuild_graph().execute()),
     ]
     c = _container()

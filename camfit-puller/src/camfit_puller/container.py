@@ -29,6 +29,7 @@ from .adapters.postgres.signal_repos import (
 )
 from .adapters.postgres.geocode_cache_repo import PostgresGeocodeCacheRepo
 from .adapters.postgres.eta_cache_repo import PostgresEtaCacheRepo
+from .adapters.postgres.mark_repo import PostgresMarkRepo
 from .adapters.pgvector.index import PgvectorIndex
 from .adapters.falkor.graph import FalkorGraph
 from .adapters.cluster.hdbscan import HdbscanClusterer
@@ -49,6 +50,7 @@ from .usecases.rebuild_graph import RebuildGraph
 from .usecases.semantic_search import SemanticSearch
 from .usecases.get_site_detail import GetSiteDetail
 from .usecases.eta_for_fleet import EtaForFleet
+from .usecases.compute_marks import ComputeMarks
 
 
 class Container:
@@ -119,6 +121,10 @@ class Container:
     @cached_property
     def eta_cache(self) -> PostgresEtaCacheRepo:
         return PostgresEtaCacheRepo(self._pg)
+
+    @cached_property
+    def mark_repo(self) -> PostgresMarkRepo:
+        return PostgresMarkRepo(self._pg)
 
     # ──────────────── Vector / Graph (lazy — needs network) ──────────────
     @cached_property
@@ -247,6 +253,9 @@ class Container:
 
     def eta_for_fleet(self) -> EtaForFleet:
         return EtaForFleet(self.camps_read, self.eta)
+
+    def compute_marks(self) -> ComputeMarks:
+        return ComputeMarks(self._pg, self.mark_repo)
 
     def close(self) -> None:
         self._pg.close()

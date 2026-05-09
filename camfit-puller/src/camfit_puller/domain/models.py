@@ -104,3 +104,12 @@ class EtaResult(BaseModel):
     minutes: Optional[int] = None
     source: Optional[str] = None
     error: Optional[str] = None
+
+
+class Mark(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    camp_id: str
+    axis: str                                  # 'management' | 'view' | 'kids' | ...
+    level: Literal["bib", "recommended", "notable", "exceptional"]
+    score: float = Field(ge=-3.0, le=3.0)      # raw temperature-weighted score
+    evidence: Optional[str] = None

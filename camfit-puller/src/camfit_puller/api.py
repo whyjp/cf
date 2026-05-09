@@ -225,6 +225,26 @@ def theme_camps(theme_id: str, limit: int = 200) -> list[dict]:
     return [c.model_dump() for c in rows]
 
 
+# ───────────────────────── Marks ─────────────────────────
+
+@app.get("/marks")
+def list_marks() -> dict:
+    """Lists all axes with mark counts + sample top scorer per axis."""
+    axes = _container.mark_repo.all_axes()
+    out: list[dict] = []
+    for axis, count in axes:
+        top = _container.mark_repo.for_axis(axis, min_level="exceptional", limit=3)
+        out.append({"axis": axis, "count": count,
+                    "top": [{"camp_id": m.camp_id, "level": m.level, "score": m.score} for m in top]})
+    return {"axes": out}
+
+
+@app.get("/marks/{axis}/camps")
+def axis_camps(axis: str, min_level: Optional[str] = None, limit: int = 100) -> list[dict]:
+    marks = _container.mark_repo.for_axis(axis, min_level=min_level, limit=limit)
+    return [m.model_dump() for m in marks]
+
+
 # ───────────────────────── ETA ─────────────────────────
 
 class EtaBatchRequest(BaseModel):
