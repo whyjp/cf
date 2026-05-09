@@ -227,6 +227,60 @@ function useDetail(id) {
   return data;
 }
 
+function useUserLocation() {
+  // navigator.geolocation.getCurrentPosition — accurate (GPS or wifi
+  // triangulation, ~10-50m). Returns { coords:{lat,lon}, status, refresh }.
+  // status:
+  //   "idle"      not asked yet (initial render frame)
+  //   "asking"    permission prompt visible
+  //   "ok"        coords populated
+  //   "denied"    user blocked
+  //   "error"     timeout / unavailable
+  //   "unsupported"  browser has no geolocation API
+  const [state, setState] = useState({ coords: null, status: "idle" });
+  const fetch = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setState({ coords: null, status: "unsupported" });
+      return;
+    }
+    setState(s => ({ coords: s.coords, status: "asking" }));
+    navigator.geolocation.getCurrentPosition(
+      pos => setState({
+        coords: { lat: pos.coords.latitude, lon: pos.coords.longitude },
+        status: "ok",
+      }),
+      err => setState({
+        coords: null,
+        status: err.code === err.PERMISSION_DENIED ? "denied" : "error",
+      }),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 },
+    );
+  }, []);
+  useEffect(() => { fetch(); }, [fetch]);
+  return { ...state, refresh: fetch };
+}
+
+
+// Haversine distance — kilometers. Used to sort camp list by proximity to
+// the user's current location and to render the per-card distance badge.
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const toRad = d => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+          + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function formatKm(km) {
+  if (km == null) return "";
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  if (km < 10) return `${km.toFixed(1)} km`;
+  return `${Math.round(km)} km`;
+}
+
+
 function useFeaturedAxes() {
   // GET /featured-axes once at mount → drives the 대표축 chip row, PinDots,
   // CampList per-card chips, FEATURED_NAMES dedup, and visibleRows boolean
@@ -338,10 +392,43 @@ function Stat({ label, value, sub }) {
   );
 }
 
+function LocationPill({ userLoc }) {
+  // Header-corner indicator + retry button. Plain text per status, all
+  // inline so it stays a single sibling among Stat / SearchBox / toggle.
+  const { coords, status, refresh } = userLoc || {};
+  const label = (() => {
+    switch (status) {
+      case "ok":          return `🧭 내 위치 사용 중 · ${coords.lat.toFixed(2)},${coords.lon.toFixed(2)}`;
+      case "asking":      return "🧭 위치 권한 요청 중…";
+      case "denied":      return "🧭 위치 차단됨 — 거리 정렬 비활성";
+      case "error":       return "🧭 위치 가져오기 실패";
+      case "unsupported": return "🧭 브라우저 위치 미지원";
+      default:            return "🧭 위치 확인 중…";
+    }
+  })();
+  const isFinal = status === "ok" || status === "denied" || status === "error" || status === "unsupported";
+  return (
+    <button
+      onClick={refresh}
+      title="클릭하여 위치 다시 가져오기"
+      className="text-[10.5px] num"
+      style={{
+        background: status === "ok" ? "rgba(37,99,235,0.08)" : "rgba(26,26,23,0.05)",
+        color: status === "ok" ? "#2563eb" : "rgba(26,26,23,0.6)",
+        border: `1px solid ${status === "ok" ? "rgba(37,99,235,0.3)" : "rgba(26,26,23,0.13)"}`,
+        borderRadius: "999px", padding: "3px 10px",
+        cursor: isFinal ? "pointer" : "default",
+      }}>
+      {label}
+    </button>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // Map
 // ─────────────────────────────────────────────────────────────
-function MapView({ rows, onPick, focused, etaMap, axes }) {
+function MapView({ rows, onPick, focused, etaMap, axes, userLoc }) {
+  const userMarkerRef = useRef(null);
   const mapRef = useRef(null);
   const layerRef = useRef(null);
   const mapEl = useRef(null);
@@ -444,6 +531,36 @@ function MapView({ rows, onPick, focused, etaMap, axes }) {
       mapRef.current.setView([focused.lat, focused.lon], 13, { animate: true });
     }
   }, [focused]);
+
+  // User-location pin — sky-blue dot, separate from the marker cluster
+  // layer so it never gets clustered. Re-positions when coords update.
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const coords = userLoc && userLoc.coords;
+    if (!coords) {
+      if (userMarkerRef.current) {
+        mapRef.current.removeLayer(userMarkerRef.current);
+        userMarkerRef.current = null;
+      }
+      return;
+    }
+    const icon = L.divIcon({
+      html: `<div style="width:18px;height:18px;border-radius:999px;
+              background:#2563eb;border:3px solid #f7f4e8;
+              box-shadow:0 0 0 6px rgba(37,99,235,0.18),0 1px 4px rgba(26,26,23,0.4);"></div>`,
+      iconSize: [18, 18], iconAnchor: [9, 9], className: "",
+    });
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setLatLng([coords.lat, coords.lon]);
+      userMarkerRef.current.setIcon(icon);
+    } else {
+      userMarkerRef.current = L.marker([coords.lat, coords.lon], {
+        icon, zIndexOffset: 9999, interactive: true, title: "내 위치",
+      }).addTo(mapRef.current);
+      userMarkerRef.current.bindTooltip("내 위치", { direction: "top", offset: [0, -10] });
+    }
+  }, [userLoc && userLoc.coords && userLoc.coords.lat,
+      userLoc && userLoc.coords && userLoc.coords.lon]);
 
   return <div ref={mapEl} className="w-full h-full" />;
 }
@@ -1036,6 +1153,12 @@ function CampList({ rows, onPick, selectedId, etaMap, axes }) {
               <div className="min-w-0 flex-1">
                 <div className="text-[11px] text-stone-500 num flex items-center gap-1.5">
                   <span>{r.sido || "—"} {r.sigungu || ""}</span>
+                  {r._distanceKm != null && (
+                    <span title="내 위치로부터 직선거리" className="chip"
+                      style={{padding:"0 6px",fontSize:"10px",borderColor:"#cfdcc9",color:"#2c4a3e",background:"rgba(44,74,62,0.06)"}}>
+                      🧭 {formatKm(r._distanceKm)}
+                    </span>
+                  )}
                   {(r.lat == null || r.lon == null) && (
                     <span title="정확한 좌표 미확인 — 지도에서 제외" className="chip" style={{padding:"0 4px",fontSize:"9px",borderColor:"#d6cfc2",color:"#9a8b6b",background:"#fdf8eb"}}>📍?</span>
                   )}
@@ -1303,6 +1426,7 @@ function minutesFrom(h, m) { return Math.max(0, (h | 0) * 60 + (m | 0)); }
 function App() {
   const [view, setView] = useState("split"); // split | map | list
   const featuredAxes = useFeaturedAxes();
+  const userLoc = useUserLocation();
   // Multi-select chip state — every long-tail dimension is a Set<string>.
   // The 대표축 row stays as one boolean per axis (`has_<id>`) because the
   // shortcuts are independent toggles, not a multi-pick set. New axes added
@@ -1458,18 +1582,36 @@ function App() {
     fetch(`${API}/eta/cache`, { method: "DELETE" }).catch(() => {});
   }, []);
 
-  // visibleRows = preEtaRows + ETA layer (when applied & active).
-  // All non-ETA client-side filters live in `preEtaRows` so applyEta can
-  // reuse the exact same candidate set; this block only adds the ETA cut.
+  // visibleRows = preEtaRows + ETA layer (when applied & active) + sort by
+  // straight-line distance from the user's current location (when known).
+  // _distanceKm is attached per row so the list card can render a "내 위치
+  // ~24 km" badge without recomputing.
   const visibleRows = useMemo(() => {
+    let out = preEtaRows;
     if (etaMap && etaActive) {
-      return preEtaRows.filter(r => {
+      out = out.filter(r => {
         const e = etaMap[r.id];
         return e && e.within;
       });
     }
-    return preEtaRows;
-  }, [preEtaRows, etaMap, etaActive]);
+    if (userLoc.coords) {
+      const { lat: ulat, lon: ulon } = userLoc.coords;
+      const withDist = out.map(r => {
+        if (r.lat == null || r.lon == null) return { ...r, _distanceKm: null };
+        return { ...r, _distanceKm: haversineKm(ulat, ulon, r.lat, r.lon) };
+      });
+      // Camps without coordinates fall to the bottom; geocoded ones sort
+      // closest-first.
+      withDist.sort((a, b) => {
+        if (a._distanceKm == null && b._distanceKm == null) return 0;
+        if (a._distanceKm == null) return 1;
+        if (b._distanceKm == null) return -1;
+        return a._distanceKm - b._distanceKm;
+      });
+      return withDist;
+    }
+    return out;
+  }, [preEtaRows, etaMap, etaActive, userLoc.coords]);
 
   const focused = useMemo(() => visibleRows.find(r => r.id === pickedId) || null, [visibleRows, pickedId]);
 
@@ -1546,6 +1688,7 @@ function App() {
                 value={featuredCounts.map(c => c.n).join(" / ")}
               />
             )}
+            <LocationPill userLoc={userLoc} />
             <SearchBox axes={featuredAxes} onPickResult={(arr) => {
               // arr is the array of search hits (or a single-item array when
               // a row was picked). Replace effective rows + fly to first.
@@ -1620,7 +1763,7 @@ function App() {
         )}
         {(view === "split" || view === "map") && (
           <section className="card overflow-hidden h-full min-h-0">
-            <MapView rows={visibleRows} onPick={setPickedId} focused={focused} etaMap={etaMap} axes={featuredAxes} />
+            <MapView rows={visibleRows} onPick={setPickedId} focused={focused} etaMap={etaMap} axes={featuredAxes} userLoc={userLoc} />
           </section>
         )}
       </main>
