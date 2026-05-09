@@ -122,7 +122,11 @@ class Container:
 
     # ──────────────── Vector / Graph (lazy — needs network) ──────────────
     @cached_property
-    def vector(self) -> PgvectorIndex:
+    def vector(self):
+        if self.settings.vector == "numpy":
+            from .adapters.numpy_vector.index import NumpyVectorIndex
+            return NumpyVectorIndex(dim=768, model_name=self.settings.embedder)
+        # default: pgvector
         return PgvectorIndex(self._pg, dim=768, model_name=self.settings.embedder)
 
     @cached_property

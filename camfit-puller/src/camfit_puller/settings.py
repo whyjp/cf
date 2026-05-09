@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     falkor_graph: str = "camfit"
 
     embedder: Literal["ko-sroberta", "mock"] = "ko-sroberta"
-    vector: Literal["pgvector"] = "pgvector"
+    vector: Literal["pgvector", "numpy"] = "pgvector"
     geocoder: Literal["nominatim", "mock"] = "nominatim"
     data_source: Literal["camfit", "local-replay", "mock"] = "local-replay"
     eta_provider: Literal["etago", "mock"] = "etago"
