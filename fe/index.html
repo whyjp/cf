@@ -128,7 +128,9 @@ const API = (typeof location !== "undefined" && location.port === "8070")
 // Hooks
 // ─────────────────────────────────────────────────────────────
 function useFacets() {
-  const [data, setData] = useState({ regions: [], categories: [], facilities: [] });
+  // /facets shape: { regions:[{sido,sigungu,count}], concept_axes:[...], concepts:[...], themes:[...] }
+  // (No `categories`/`facilities` keys — those were stale assumptions in older FE code.)
+  const [data, setData] = useState({ regions: [], concept_axes: [], concepts: [], themes: [] });
   const [err, setErr] = useState(null);
   useEffect(() => {
     fetch(`${API}/facets`).then(r => r.json()).then(setData).catch(e => setErr(String(e)));
@@ -137,24 +139,24 @@ function useFacets() {
 }
 
 function useSites(filters) {
+  // Server-side params: only `region` (sido) and `concept` (single name, AND).
+  // Boolean axes (has_valley/has_kids/has_trampoline) and `collection` are
+  // applied client-side in App.visibleRows because /sites already returns
+  // those derived booleans on every row.
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   useEffect(() => {
     const params = new URLSearchParams();
     if (filters.region) params.set("region", filters.region);
-    if (filters.category) params.set("category", filters.category);
-    if (filters.facility) params.set("facility", filters.facility);
-    if (filters.has_valley) params.set("has_valley", "true");
-    if (filters.has_kids) params.set("has_kids", "true");
-    if (filters.has_trampoline) params.set("has_trampoline", "true");
+    if (filters.concept) params.set("concept", filters.concept);
     setLoading(true); setErr(null);
     fetch(`${API}/sites?${params.toString()}`)
       .then(r => r.json())
       .then(d => setRows(Array.isArray(d) ? d : []))
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
-  }, [filters.region, filters.category, filters.facility, filters.has_valley, filters.has_kids, filters.has_trampoline]);
+  }, [filters.region, filters.concept]);
   return { rows, loading, err };
 }
 
@@ -391,20 +393,51 @@ function MiniMap({ lat, lon, name }) {
 // ─────────────────────────────────────────────────────────────
 // List & Filters
 // ─────────────────────────────────────────────────────────────
-function FilterBar({ filters, set, facets }) {
+function FilterBar({ filters, set, facets, rows }) {
   const sidoSet = useMemo(
     () => Array.from(new Set((facets.regions || []).map(r => r.sido).filter(Boolean))).sort(),
     [facets]
   );
-  // Dynamic categories — exclude FEATURED ones (rendered as boolean axis chips above).
-  const dynCats = useMemo(
-    () => (facets.categories || []).filter(c => !FEATURED_NAMES.has(c.name)),
+
+  // Concept axes — first-class concept-graph axes (kids/valley/pets/...).
+  // /facets returns ~6 of these; surface them as a dedicated row. Featured
+  // names (계곡/키즈캠핑/트램펄린) are stripped here because they're already
+  // covered by the boolean 대표축 row.
+  const conceptAxes = useMemo(
+    () => (facets.concept_axes || []).filter(c => !FEATURED_NAMES.has(c.name)),
     [facets]
   );
-  const dynFacs = useMemo(
-    () => (facets.facilities || []).filter(f => !FEATURED_NAMES.has(f.name)),
+
+  // Long-tail concepts (hashtag/facility-derived). Filter to count>0 and
+  // top 40 by count so the UI doesn't drown in low-signal entries.
+  const conceptChips = useMemo(
+    () => (facets.concepts || [])
+      .filter(c => (c.count || 0) > 0 && !FEATURED_NAMES.has(c.name))
+      .slice(0, 40),
     [facets]
   );
+
+  // Collections — derived in-FE from currently-loaded rows. Each camp's
+  // `categories` array contains "콜렉션:...", "전시:E..." and "테마:..."
+  // prefixed entries. Aggregate distinct names with counts. Independent of
+  // /facets because the server-side facets endpoint doesn't expose them.
+  const collectionChips = useMemo(() => {
+    if (!rows || rows.length === 0) return [];
+    const counts = new Map();
+    for (const r of rows) {
+      for (const c of (r.categories || [])) {
+        if (typeof c !== "string") continue;
+        if (c.startsWith("콜렉션:") || c.startsWith("전시:") || c.startsWith("테마:")) {
+          counts.set(c, (counts.get(c) || 0) + 1);
+        }
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([name, count]) => ({ name, count }));
+  }, [rows]);
+
   return (
     <div className="space-y-3">
       {/* Featured boolean axes — hardcoded rich UI for known categories */}
@@ -440,42 +473,144 @@ function FilterBar({ filters, set, facets }) {
         ))}
       </div>
 
-      {/* Dynamic category chips — discovered from /facets after each crawl */}
-      {dynCats.length > 0 && (
+      {/* Concept axes — first-class concept toggles from /facets.concept_axes */}
+      {conceptAxes.length > 0 && (
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">카테고리</span>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">컨셉 축</span>
           <button
-            onClick={() => set({ category: "" })}
-            className={`chip ${!filters.category ? "" : "opacity-70 hover:opacity-100"}`}
-            style={!filters.category ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>전체</button>
-          {dynCats.map(c => (
+            onClick={() => set({ concept: "" })}
+            className={`chip ${!filters.concept ? "" : "opacity-70 hover:opacity-100"}`}
+            style={!filters.concept ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>전체</button>
+          {conceptAxes.map(ca => (
             <DynamicChip
-              key={c.name}
-              name={c.name}
-              count={c.count}
-              active={filters.category === c.name}
-              onClick={() => set({ category: filters.category === c.name ? "" : c.name })}
+              key={ca.id || ca.name}
+              name={ca.name}
+              count={ca.count}
+              active={filters.concept === ca.name}
+              onClick={() => set({ concept: filters.concept === ca.name ? "" : ca.name })}
             />
           ))}
         </div>
       )}
 
-      {/* Dynamic facility chips */}
-      {dynFacs.length > 0 && (
+      {/* Long-tail concepts — top 40 by count from /facets.concepts */}
+      {conceptChips.length > 0 && (
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">시설</span>
-          <button
-            onClick={() => set({ facility: "" })}
-            className={`chip ${!filters.facility ? "" : "opacity-70 hover:opacity-100"}`}
-            style={!filters.facility ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>전체</button>
-          {dynFacs.map(f => (
+          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">컨셉</span>
+          {conceptChips.map(c => (
             <DynamicChip
-              key={f.name}
-              name={f.name}
-              count={f.count}
-              active={filters.facility === f.name}
-              onClick={() => set({ facility: filters.facility === f.name ? "" : f.name })}
+              key={c.id || c.name}
+              name={c.name}
+              count={c.count}
+              active={filters.concept === c.name}
+              onClick={() => set({ concept: filters.concept === c.name ? "" : c.name })}
             />
+          ))}
+        </div>
+      )}
+
+      {/* Collections — derived client-side from rows.categories prefixes */}
+      {collectionChips.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500 mr-1">컬렉션</span>
+          <button
+            onClick={() => set({ collection: "" })}
+            className={`chip ${!filters.collection ? "" : "opacity-70 hover:opacity-100"}`}
+            style={!filters.collection ? { boxShadow: "inset 0 0 0 1.5px var(--moss-deep)" } : null}>전체</button>
+          {collectionChips.map(c => (
+            <DynamicChip
+              key={c.name}
+              name={c.name}
+              count={c.count}
+              active={filters.collection === c.name}
+              onClick={() => set({ collection: filters.collection === c.name ? "" : c.name })}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// SearchBox — semantic search via /sites/search?q=…
+// Pattern adapted from fe/graph.html SearchBox; result shape
+// here is the flat _camp_to_fe_row dict (id/name/sido/sigungu/...).
+// ─────────────────────────────────────────────────────────────
+function SearchBox({ onPickResult }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const tRef = useRef(null);
+
+  useEffect(() => {
+    if (tRef.current) clearTimeout(tRef.current);
+    if (!q.trim()) { setResults([]); setOpen(false); return; }
+    setBusy(true);
+    tRef.current = setTimeout(() => {
+      fetch(`${API}/sites/search?q=${encodeURIComponent(q.trim())}&k=20`)
+        .then(r => r.json())
+        .then(d => {
+          const arr = Array.isArray(d) ? d : (d.results || d.hits || []);
+          setResults(arr);
+          setOpen(true);
+        })
+        .catch(() => setResults([]))
+        .finally(() => setBusy(false));
+    }, 250);
+  }, [q]);
+
+  const apply = (asList) => {
+    onPickResult(asList);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onFocus={() => results.length && setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 180)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && results.length > 0) {
+            e.preventDefault();
+            apply(results);
+          }
+          if (e.key === "Escape") { setOpen(false); }
+        }}
+        placeholder="🔎 시멘틱 검색 (예: 계곡 옆 키즈)"
+        className="text-sm bg-[color:var(--paper)] border hairline rounded-md px-3 py-1.5 outline-none focus:border-stone-900 w-[260px]"
+      />
+      {open && (results.length > 0 || busy) && (
+        <div className="absolute z-[1200] mt-1 w-[320px] max-h-80 overflow-auto bg-[color:var(--paper)] border hairline rounded-md shadow-lg right-0">
+          {busy && results.length === 0 && (
+            <div className="px-3 py-2 text-[12px] text-stone-500">검색 중…</div>
+          )}
+          {results.length > 0 && (
+            <button
+              onMouseDown={(e) => { e.preventDefault(); apply(results); }}
+              className="w-full text-left px-3 py-2 hover:bg-stone-200/60 border-b hairline text-[12px] font-semibold text-[color:var(--moss-deep)]">
+              📍 검색결과 {results.length}건 지도에 적용
+            </button>
+          )}
+          {results.map((n, i) => (
+            <button
+              key={n.id || i}
+              onMouseDown={(e) => { e.preventDefault(); apply([n]); }}
+              className="w-full text-left px-3 py-2 hover:bg-stone-200/60 border-b hairline last:border-b-0 flex items-center gap-2">
+              <span className="text-[11px] num text-stone-500 w-5">{i + 1}</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12.5px] truncate font-medium">{n.name || "(이름 미상)"}</div>
+                <div className="text-[10.5px] text-stone-500 truncate">
+                  {(n.sido || "") + " " + (n.sigungu || "")}
+                  {n.has_valley ? " · 🌊" : ""}
+                  {n.has_kids ? " · 🧒" : ""}
+                  {n.has_trampoline ? " · 🤸" : ""}
+                </div>
+              </div>
+            </button>
           ))}
         </div>
       )}
@@ -729,11 +864,24 @@ function minutesFrom(h, m) { return Math.max(0, (h | 0) * 60 + (m | 0)); }
 
 function App() {
   const [view, setView] = useState("split"); // split | map | list
-  const [filters, setFilters] = useState({ region: "", category: "", facility: "", has_valley: false, has_kids: false, has_trampoline: false });
+  const [filters, setFilters] = useState({
+    region: "",
+    concept: "",       // server-side filter (single name, AND)
+    collection: "",    // client-side filter (rows.categories includes it)
+    has_valley: false, has_kids: false, has_trampoline: false,
+  });
   const [pickedId, setPickedId] = useState(null);
+  // null when search isn't active; array when it is. When set, overrides
+  // the /sites result for both the list and the map.
+  const [searchResults, setSearchResults] = useState(null);
   const setF = useCallback((patch) => setFilters(prev => ({ ...prev, ...patch })), []);
   const { data: facets, err: facetsErr } = useFacets();
-  const { rows, loading, err } = useSites(filters);
+  const { rows: sitesRows, loading, err } = useSites(filters);
+  // Effective rows pre-clientside-filtering: search results take priority.
+  const rows = useMemo(
+    () => (searchResults != null ? searchResults : sitesRows),
+    [searchResults, sitesRows]
+  );
 
   // ETA state
   const [origin, setOrigin] = useState("");
@@ -777,14 +925,24 @@ function App() {
     fetch(`${API}/eta/cache`, { method: "DELETE" }).catch(() => {});
   }, []);
 
-  // Apply ETA filter on top of API rows.
+  // Apply boolean-axis + collection + ETA filters client-side. The /sites
+  // response already carries has_valley/has_kids/has_trampoline as
+  // _camp_to_fe_row-derived booleans, so we filter locally instead of
+  // re-querying the server for each toggle.
   const visibleRows = useMemo(() => {
-    if (!etaMap || !etaActive) return rows;
-    return rows.filter(r => {
-      const e = etaMap[r.id];
-      return e && e.within;
-    });
-  }, [rows, etaMap, etaActive]);
+    let out = rows;
+    if (filters.has_valley) out = out.filter(r => r.has_valley);
+    if (filters.has_kids) out = out.filter(r => r.has_kids);
+    if (filters.has_trampoline) out = out.filter(r => r.has_trampoline);
+    if (filters.collection) out = out.filter(r => (r.categories || []).includes(filters.collection));
+    if (etaMap && etaActive) {
+      out = out.filter(r => {
+        const e = etaMap[r.id];
+        return e && e.within;
+      });
+    }
+    return out;
+  }, [rows, filters.has_valley, filters.has_kids, filters.has_trampoline, filters.collection, etaMap, etaActive]);
 
   const focused = useMemo(() => visibleRows.find(r => r.id === pickedId) || null, [visibleRows, pickedId]);
 
@@ -814,10 +972,16 @@ function App() {
               </div>
             </div>
           </div>
-          <div className="hidden md:flex gap-8 items-end">
+          <div className="hidden md:flex gap-6 items-end">
             <Stat label="총" value={total.toLocaleString()} sub="필터 적용 후" />
             <Stat label="좌표" value={`${withCoord}`} sub={total ? `${Math.round(withCoord/total*100)}%` : "—"} />
             <Stat label="계곡 / 키즈 / 트램펄린" value={`${counts.valley} / ${counts.kids} / ${counts.tramp}`} />
+            <SearchBox onPickResult={(arr) => {
+              // arr is the array of search hits (or a single-item array when
+              // a row was picked). Replace effective rows + fly to first.
+              setSearchResults(arr);
+              if (arr && arr.length > 0 && arr[0].id != null) setPickedId(arr[0].id);
+            }} />
             <div className="toggle-pill">
               <button className={view === "split" ? "active" : ""} onClick={() => setView("split")}>분할</button>
               <button className={view === "map" ? "active" : ""} onClick={() => setView("map")}>지도</button>
@@ -827,7 +991,14 @@ function App() {
           </div>
         </div>
         <div className="max-w-[1500px] mx-auto px-6 pb-4 space-y-3">
-          <FilterBar filters={filters} set={setF} facets={facets} />
+          {searchResults != null && (
+            <div className="flex items-center gap-2 text-[12px] px-3 py-2 rounded-lg border hairline"
+                 style={{ background: "rgba(200,85,61,0.08)", color: "var(--ember)", borderColor: "rgba(200,85,61,0.25)" }}>
+              <span>🔎 검색결과 <span className="num font-semibold">{searchResults.length}</span>건 표시 중</span>
+              <button onClick={() => setSearchResults(null)} className="btn ml-auto">전체보기</button>
+            </div>
+          )}
+          <FilterBar filters={filters} set={setF} facets={facets} rows={rows} />
           <EtaBar
             origin={origin} setOrigin={setOrigin}
             hours={etaHours} setHours={setEtaHours}
