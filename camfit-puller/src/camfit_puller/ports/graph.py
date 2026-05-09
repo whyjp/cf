@@ -1,0 +1,9 @@
+from __future__ import annotations
+from typing import Any, Optional, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class GraphStore(Protocol):
+    def query(self, cypher: str, params: dict | None = None) -> list[list[Any]]: ...
+    def reset(self, graph_name: Optional[str] = None) -> None: ...
+    def healthcheck(self) -> bool: ...

@@ -1,0 +1,13 @@
+from __future__ import annotations
+from typing import Protocol, runtime_checkable
+import numpy as np
+
+
+@runtime_checkable
+class Embedder(Protocol):
+    @property
+    def model_name(self) -> str: ...
+    @property
+    def dim(self) -> int: ...
+    def encode_one(self, text: str) -> np.ndarray: ...
+    def encode_batch(self, texts: list[str], batch_size: int = 32) -> np.ndarray: ...
