@@ -1,6 +1,11 @@
 import { useMemo } from "react";
 import { useDetail } from "../../shared/hooks/useDetail";
-import type { EtaResult, FeaturedAxis } from "../../shared/types";
+import type {
+  EtaResult,
+  FeaturedAxis,
+  SiteDetailPhoto,
+  SiteDetailReview,
+} from "../../shared/types";
 import { Chip, EtaBadge, prettyTag, tagHue } from "./atoms";
 import { Stat } from "./atoms";
 import { MiniMap } from "./MiniMap";
@@ -17,20 +22,6 @@ export interface DetailPanelProps {
   onClose: () => void;
   eta?: EtaResult | null;
   axes: FeaturedAxis[];
-}
-
-interface ReviewLite {
-  user?: string;
-  season?: string;
-  userType?: string;
-  numOfDays?: number;
-  score?: number | null;
-  text: string;
-}
-
-interface PhotoLite {
-  url: string;
-  thumb: string;
 }
 
 export function DetailPanel({ id, onClose, eta, axes }: DetailPanelProps) {
@@ -54,14 +45,14 @@ export function DetailPanel({ id, onClose, eta, axes }: DetailPanelProps) {
       </div>
     );
 
-  // Detail rows are loose — extract optional fields with safe casts.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const d = data as any;
-  const cats: string[] = d.categories || [];
-  const facs: string[] = d.facilities || [];
-  const photos: PhotoLite[] = d.photos || [];
-  const reviewsTop: ReviewLite[] = d.reviews_top || [];
-  const hashtags: string[] = d.hashtags || [];
+  // `data` is SiteDetail (extends Site) — detail-only fields are typed-optional;
+  // local aliases keep the JSX terse and default to empty arrays for ergonomics.
+  const d = data;
+  const cats: string[] = d.categories ?? [];
+  const facs: string[] = d.facilities ?? [];
+  const photos: SiteDetailPhoto[] = d.photos ?? [];
+  const reviewsTop: SiteDetailReview[] = d.reviews_top ?? [];
+  const hashtags: string[] = d.hashtags ?? [];
   return (
     <div
       data-panel="detail"

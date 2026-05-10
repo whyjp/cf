@@ -41,6 +41,54 @@ export interface Site {
 }
 
 /**
+ * Photo embedded in a `SiteDetail` payload — backend BFF post-processing
+ * shape. Mirrors the projection emitted by `cf_be_for_fe` for /sites/:id.
+ */
+export interface SiteDetailPhoto {
+  url: string;
+  thumb: string;
+}
+
+/**
+ * Single review row preview returned by /sites/:id under `reviews_top`.
+ * Backend trims to ~6 entries; the full set lives behind a separate
+ * /reviews endpoint (not yet wired into FE).
+ */
+export interface SiteDetailReview {
+  user?: string;
+  season?: string;
+  userType?: string;
+  numOfDays?: number;
+  score?: number | null;
+  text: string;
+}
+
+/**
+ * /sites/:id response — extends the list-row `Site` with detail-only fields
+ * (description, brief, contact, photos, reviews, etc.) emitted by
+ * `cf_be_for_fe` only on the detail endpoint. All fields are optional —
+ * server may omit them when upstream camfit data is sparse.
+ *
+ * Consumed by `useDetail` → DetailPanel (desktop) / DetailSheet (mobile).
+ */
+export interface SiteDetail extends Site {
+  region_sido?: string;
+  url?: string;
+  description?: string;
+  brief?: string;
+  locationBrief?: string;
+  contact?: string;
+  priceStartFrom?: number;
+  priceEndTo?: number;
+  numOfReviews?: number;
+  bookmarkCount?: number;
+  photos?: SiteDetailPhoto[];
+  reviews_top?: SiteDetailReview[];
+  reviews_total?: number;
+  hashtags?: string[];
+}
+
+/**
  * 대표축 metadata. Backend-driven via GET /featured-axes — see
  * `useFeaturedAxes`. Field shape mirrors
  * cf_be_api.domain.featured_axes.FeaturedAxis. `name` is an alias-friendly
