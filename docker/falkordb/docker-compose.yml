@@ -1,0 +1,18 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: camfit-falkordb
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+      - "3000:3000"   # FalkorDB Browser UI
+    volumes:
+      - falkor_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  falkor_data:
