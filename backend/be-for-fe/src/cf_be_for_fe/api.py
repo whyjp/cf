@@ -9,6 +9,7 @@ from typing import Optional, Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .settings import Settings
 from .client import BeApiClient, BeApiError
@@ -135,3 +136,18 @@ def site_similar(site_id: str, k: int = 10) -> list[dict]:
 def site_detail(site_id: str) -> dict:
     raw = _passthrough_get(f"/sites/{site_id}")
     return project_site_detail(raw)
+
+
+# ───────────────────────── FE static mount (SP-B B4) ─────────────────────
+#
+# BFF serves fe/dist/ at "/" — Vite build output. Must be defined LAST so
+# concrete /sites, /facets, /healthz routes above take precedence over the
+# catch-all StaticFiles handler.
+#
+# `is_dir()` guard: in CI cold env or before `npm run build`, fe/dist may not
+# exist. Skip mount in that case (BFF still serves API routes; "/" 404s).
+# Run `cd fe && npm run build` to produce the static bundle.
+
+_fe_path = _settings.fe_dir
+if _fe_path.is_dir():
+    app.mount("/", StaticFiles(directory=str(_fe_path), html=True), name="fe")
