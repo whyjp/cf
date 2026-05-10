@@ -195,10 +195,13 @@ def pipeline_embed():
 
 
 @pipeline_app.command("extract-filter")
-def pipeline_extract_filter():
+def pipeline_extract_filter(
+    workers: int = typer.Option(8, "--workers", "-w",
+                                help="Parallel workers (capped at PG pool max=8)."),
+):
     """ExtractCamfitFilterSignals — collections → camp_filter_signals."""
     c = _container()
-    n = c.extract_filter_signals().execute()
+    n = c.extract_filter_signals().execute(workers=max(1, workers))
     console.print(f"[extract-filter] {n} signals written")
     c.close()
 
