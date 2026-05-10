@@ -24,6 +24,18 @@ export BACKEND_PORT="${BACKEND_PORT:-8000}"
 export BACKEND_PID_FILE="$RUN_DIR/backend.pid"
 export BACKEND_LOG_FILE="$RUN_DIR/backend.log"
 
+# be-api / be-for-fe split (SP-A) -- prefer dev-up.sh over backend-up.sh.
+# BACKEND_* above kept for backwards-compat only.
+export BE_API_HOST="${BE_API_HOST:-127.0.0.1}"
+export BE_API_PORT="${BE_API_PORT:-8071}"
+export BE_API_PID_FILE="$RUN_DIR/be-api.pid"
+export BE_API_LOG_FILE="$RUN_DIR/be-api.log"
+
+export BFF_HOST="${BFF_HOST:-0.0.0.0}"
+export BFF_PORT="${BFF_PORT:-8070}"
+export BFF_PID_FILE="$RUN_DIR/bff.pid"
+export BFF_LOG_FILE="$RUN_DIR/bff.log"
+
 # uv binary detection -- WSL doesn't auto-resolve .exe
 if command -v uv >/dev/null 2>&1; then
     export UV=uv
