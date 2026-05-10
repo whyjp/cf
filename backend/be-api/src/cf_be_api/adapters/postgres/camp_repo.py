@@ -168,6 +168,30 @@ class PostgresCampReader:
                 for row in cur:
                     yield self._enrich(c, row)
 
+    def existing_ids_by_source(self, source: str) -> set[str]:
+        with self._pool.conn() as c, c.cursor() as cur:
+            cur.execute("SELECT id FROM camps WHERE source = %s", (source,))
+            return {r[0] for r in cur.fetchall()}
+
+    def iter_since(self, *, since_iso: str | None = None, ids: list[str] | None = None) -> Iterator[Camp]:
+        wh: list[str] = []
+        params: list = []
+        if since_iso:
+            wh.append("fetched_at > %s::timestamptz")
+            params.append(since_iso)
+        if ids:
+            wh.append("id = ANY(%s)")
+            params.append(list(ids))
+        if not wh:
+            yield from self.iter_all()
+            return
+        sql = f"SELECT {_LIST_FIELDS} FROM camps WHERE " + " OR ".join(wh)
+        with self._pool.conn() as c:
+            with c.cursor(row_factory=dict_row, name="camp_iter_since") as cur:
+                cur.execute(sql, params)
+                for row in cur:
+                    yield self._enrich(c, row)
+
     def count(self) -> int:
         with self._pool.conn() as c, c.cursor() as cur:
             cur.execute("SELECT count(*) FROM camps")

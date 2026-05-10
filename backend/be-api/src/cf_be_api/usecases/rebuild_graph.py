@@ -38,10 +38,31 @@ class RebuildGraph:
     theme_repo: ThemeRepository
     graph: GraphStore
 
-    def execute(self) -> dict:
-        self.graph.reset()
+    def execute(
+        self,
+        *,
+        since_iso: str | None = None,
+        ids: list[str] | None = None,
+    ) -> dict:
+        """Rebuild graph from PG.
+
+        Modes:
+          full (default): graph.reset() + iter_all + MERGE/SET for every camp.
+          incremental (since_iso or ids given): NO reset, only camps matching the
+            filter get MERGE/SET. Concepts/Themes/edges still re-derived (they
+            depend on signals which may have changed for the touched camps).
+        """
+        incremental = bool(since_iso or ids)
+        if not incremental:
+            self.graph.reset()
+
         n_camps = 0
-        for camp in self.camp_reader.iter_all():
+        camp_iter = (
+            self.camp_reader.iter_since(since_iso=since_iso, ids=ids)
+            if incremental
+            else self.camp_reader.iter_all()
+        )
+        for camp in camp_iter:
             params = {
                 "id": camp.id,
                 "name": camp.name,
