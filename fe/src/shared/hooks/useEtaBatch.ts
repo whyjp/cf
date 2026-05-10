@@ -1,10 +1,19 @@
 import { useCallback, useRef, useState } from "react";
 import { API_BASE, postJson } from "../api";
-import type { EtaBatchResponse, EtaResult, UserCoords } from "../types";
+import type { EtaBatchResponse, EtaResult } from "../types";
 
 interface BatchInput {
-  /** Origin can be free-text address (geocoded by BE) or {lat,lon}. */
-  origin: UserCoords | string;
+  /**
+   * Origin must be a string. Two accepted forms:
+   *   - Free-text address (geocoded server-side, e.g. "서울 강남구").
+   *   - "<lat>,<lon>" pair when the caller already has user coords.
+   *
+   * The BE `/eta/batch` route schema declares `origin: str`, so callers
+   * holding `{lat, lon}` MUST format `"${lat},${lon}"` before invoking
+   * `apply` (see EtaSheet for the canonical conversion). Sending a
+   * `{lat, lon}` object here used to silently 422 (review note A4).
+   */
+  origin: string;
   ids: string[];
   max_minutes?: number | null;
 }
