@@ -12,6 +12,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -31,14 +32,18 @@ var primaryKey = map[string][]string{
 	"Facility": {"name"},
 }
 
-// GraphHandler bundles the four /graph/* endpoints.
+// GraphHandler bundles the four /graph/* endpoints. `eta` is OPTIONAL —
+// when nil the post-query Camp-pruning on /graph/{sample,expand} is silently
+// disabled (the eta_origin/eta_max_minutes query params become no-ops, same
+// observable behaviour as the pre-D-7 state).
 type GraphHandler struct {
 	graph ports.GraphReader
+	eta   ports.EtaProvider
 }
 
-// NewGraphHandler constructs a GraphHandler.
-func NewGraphHandler(g ports.GraphReader) *GraphHandler {
-	return &GraphHandler{graph: g}
+// NewGraphHandler constructs a GraphHandler. eta may be nil.
+func NewGraphHandler(g ports.GraphReader, eta ports.EtaProvider) *GraphHandler {
+	return &GraphHandler{graph: g, eta: eta}
 }
 
 // ─────────────────────────── helpers (Python parity) ───────────────────────
@@ -291,11 +296,13 @@ func (h *GraphHandler) GraphSchema(w http.ResponseWriter, r *http.Request) {
 //	limit              default 200, range [1, 100000]
 //	sido / sigungu     filter Camps to this region (only for Camp-anchored mode)
 //	concept            filter Camps that have HAS_CATEGORY|HAS_FACILITY → name
+//	eta_origin         (D-7) origin place name; pairs with eta_max_minutes
+//	eta_max_minutes    (D-7) drop Camp nodes whose drive ETA exceeds this
 //
-// Note: eta_origin / eta_max_minutes are accepted but currently no-op in Go;
-// the post-query Camp-pruning logic is captured in a TODO. The `X-Warning`
-// header surfaces the gap when set. Cross-validation only checks the un-ETA
-// path, so byte-equal regression still passes.
+// When `eta_origin` + `eta_max_minutes` are both present, Camp nodes are
+// post-pruned in-process via the configured EtaProvider. Edges to dropped
+// Camps are also dropped (matching Python). Non-Camp neighbours are kept.
+// On ETA failure: `X-Warning: eta: <type>: <msg>` header, no pruning applied.
 func (h *GraphHandler) GraphSample(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	labelList := parseLabels(q.Get("labels"))
@@ -309,6 +316,9 @@ func (h *GraphHandler) GraphSample(w http.ResponseWriter, r *http.Request) {
 	sigungu := q.Get("sigungu")
 	concept := q.Get("concept")
 	hasCampFilter := sido != "" || sigungu != "" || concept != ""
+	etaOrigin := q.Get("eta_origin")
+	etaMaxMinutes, hasEta := parseEtaMaxMinutes(q.Get("eta_max_minutes"))
+	hasEta = hasEta && etaOrigin != "" && h.eta != nil
 
 	var (
 		cy     string
@@ -367,6 +377,16 @@ func (h *GraphHandler) GraphSample(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// D-7: ETA pruning. Compute the keep-set first so the row loop can
+	// drop both Camp nodes AND any edge incident to them (Python parity).
+	var (
+		etaKeep    map[string]struct{} // nil = no pruning, non-nil = keep these Camp ids
+		etaWarning string
+	)
+	if hasEta {
+		etaKeep, etaWarning = h.computeEtaKeep(r.Context(), rs, etaOrigin, etaMaxMinutes)
+	}
+
 	nodes := map[string]map[string]any{}
 	edges := []map[string]any{}
 	type edgeKey struct{ src, dst, rt string }
@@ -380,17 +400,20 @@ func (h *GraphHandler) GraphSample(w http.ResponseWriter, r *http.Request) {
 		lM, _ := row["l_m"].(string)
 		pM := propsMap(row["p_m"])
 
-		if lN != "" {
+		nDrop := campDropped(etaKeep, lN, pN)
+		mDrop := lM != "" && campDropped(etaKeep, lM, pM)
+
+		if lN != "" && !nDrop {
 			el := nodeElement(lN, pN)
 			id := el["data"].(map[string]any)["id"].(string)
 			nodes[id] = el
 		}
-		if lM != "" {
+		if lM != "" && !mDrop {
 			el := nodeElement(lM, pM)
 			id := el["data"].(map[string]any)["id"].(string)
 			nodes[id] = el
 		}
-		if rT != "" && lN != "" && lM != "" {
+		if rT != "" && lN != "" && lM != "" && !nDrop && !mDrop {
 			var srcLabel, dstLabel string
 			var srcProps, dstProps map[string]any
 			if rDir == "out" {
@@ -413,6 +436,9 @@ func (h *GraphHandler) GraphSample(w http.ResponseWriter, r *http.Request) {
 		"nodes": mapValues(nodes),
 		"edges": edges,
 	}
+	if etaWarning != "" {
+		w.Header().Set("X-Warning", etaWarning)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(body)
 }
@@ -423,12 +449,15 @@ func (h *GraphHandler) GraphSample(w http.ResponseWriter, r *http.Request) {
 //
 // Query params:
 //
-//	id          required; cytoscape node id, e.g. "Camp:abc"
-//	direction   "in" | "out" | "both" (default "both")
-//	limit       default 60, range [1, 500]
+//	id                 required; cytoscape node id, e.g. "Camp:abc"
+//	direction          "in" | "out" | "both" (default "both")
+//	limit              default 60, range [1, 500]
+//	eta_origin         (D-7) origin place name; pairs with eta_max_minutes
+//	eta_max_minutes    (D-7) drop Camp neighbours whose drive ETA exceeds this
 //
-// eta_origin / eta_max_minutes accepted but currently no-op (same as
-// /graph/sample).
+// ETA pruning identical to /graph/sample — Camp neighbours over budget +
+// any edges incident to them are dropped post-query. Non-Camp neighbours
+// are unaffected.
 func (h *GraphHandler) GraphExpand(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	id := q.Get("id")
@@ -450,6 +479,9 @@ func (h *GraphHandler) GraphExpand(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	etaOrigin := q.Get("eta_origin")
+	etaMaxMinutes, hasEta := parseEtaMaxMinutes(q.Get("eta_max_minutes"))
+	hasEta = hasEta && etaOrigin != "" && h.eta != nil
 
 	label, natural := parseNodeID(id)
 	if label == "" || natural == "" {
@@ -486,6 +518,15 @@ func (h *GraphHandler) GraphExpand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// D-7: same ETA prune machinery as GraphSample.
+	var (
+		etaKeep    map[string]struct{}
+		etaWarning string
+	)
+	if hasEta {
+		etaKeep, etaWarning = h.computeEtaKeep(r.Context(), rs, etaOrigin, etaMaxMinutes)
+	}
+
 	nodes := map[string]map[string]any{}
 	edges := []map[string]any{}
 	for i, row := range rs {
@@ -496,17 +537,20 @@ func (h *GraphHandler) GraphExpand(w http.ResponseWriter, r *http.Request) {
 		lM, _ := row["l_m"].(string)
 		pM := propsMap(row["p_m"])
 
-		if lN != "" {
+		nDrop := campDropped(etaKeep, lN, pN)
+		mDrop := lM != "" && campDropped(etaKeep, lM, pM)
+
+		if lN != "" && !nDrop {
 			el := nodeElement(lN, pN)
 			id := el["data"].(map[string]any)["id"].(string)
 			nodes[id] = el
 		}
-		if lM != "" {
+		if lM != "" && !mDrop {
 			el := nodeElement(lM, pM)
 			id := el["data"].(map[string]any)["id"].(string)
 			nodes[id] = el
 		}
-		if rT != "" && lN != "" && lM != "" {
+		if rT != "" && lN != "" && lM != "" && !nDrop && !mDrop {
 			if rDir == "out" {
 				edges = append(edges, edgeElement(rT, pN, pM, lN, lM, i))
 			} else {
@@ -518,6 +562,9 @@ func (h *GraphHandler) GraphExpand(w http.ResponseWriter, r *http.Request) {
 	body := map[string]any{
 		"nodes": mapValues(nodes),
 		"edges": edges,
+	}
+	if etaWarning != "" {
+		w.Header().Set("X-Warning", etaWarning)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(body)
@@ -749,4 +796,174 @@ func errType(err error) string {
 		return t[i+1:]
 	}
 	return t
+}
+
+// ─────────────────────────── ETA pruning helpers (D-7) ──────────────────────
+
+// parseEtaMaxMinutes parses the eta_max_minutes query string. Returns
+// (value, true) on a positive int in [1, 1440]; (0, false) otherwise. The
+// 1440 upper bound matches Python's `Query(..., ge=1, le=1440)`.
+func parseEtaMaxMinutes(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > 1440 {
+		return 0, false
+	}
+	return n, true
+}
+
+// campDropped — pruning predicate. Mirrors Python `_camp_dropped`:
+//   - keepSet=nil (no ETA filter requested or it errored): never drop
+//   - non-Camp label: never drop
+//   - Camp with no `id` in props: drop (Python `cid is not None else True`)
+//   - Camp with id ∈ keepSet: keep; otherwise drop
+func campDropped(keepSet map[string]struct{}, label string, props map[string]any) bool {
+	if keepSet == nil {
+		return false
+	}
+	if label != "Camp" {
+		return false
+	}
+	cid, ok := props["id"]
+	if !ok || cid == nil {
+		return true
+	}
+	cidStr := fmt.Sprintf("%v", cid)
+	if cidStr == "" {
+		return true
+	}
+	_, kept := keepSet[cidStr]
+	return !kept
+}
+
+// computeEtaKeep walks the graph result-set, gathers Camp props, builds
+// (cid, place) pairs the same way Python does (region → address → name —
+// AND requires lat/lon), then calls EtaProvider.DriveEtaBatch to keep only
+// Camps whose minutes ≤ etaMaxMinutes.
+//
+// Returns:
+//   - keep set (may be empty if no Camps had usable place + coords)
+//   - warning string for X-Warning header (empty on success)
+//
+// On EtaProvider error: returns (nil, "eta: <type>: <msg>") so the caller
+// skips pruning AND surfaces the gap to the FE — same pattern as Python.
+func (h *GraphHandler) computeEtaKeep(
+	ctx context.Context,
+	rows []map[string]any,
+	origin string,
+	maxMinutes int,
+) (map[string]struct{}, string) {
+	campProps := map[string]map[string]any{}
+	for _, row := range rows {
+		if lN, _ := row["l_n"].(string); lN == "Camp" {
+			pN := propsMap(row["p_n"])
+			if cid := propsCampID(pN); cid != "" {
+				campProps[cid] = pN
+			}
+		}
+		if lM, _ := row["l_m"].(string); lM == "Camp" {
+			pM := propsMap(row["p_m"])
+			if cid := propsCampID(pM); cid != "" {
+				campProps[cid] = pM
+			}
+		}
+	}
+	if len(campProps) == 0 {
+		return map[string]struct{}{}, ""
+	}
+
+	pairs := make([]ports.EtaDest, 0, len(campProps))
+	for cid, props := range campProps {
+		place := campPlaceFromProps(props)
+		if place == "" {
+			continue
+		}
+		// Camps with no resolvable place + no lat/lon: drop (Python parity:
+		// `if place and (lat is not None and lon is not None)`).
+		if !propsHasLatLon(props) {
+			continue
+		}
+		pairs = append(pairs, ports.EtaDest{ID: cid, Place: place})
+	}
+	if len(pairs) == 0 {
+		return map[string]struct{}{}, ""
+	}
+
+	raw, err := h.eta.DriveEtaBatch(ctx, origin, pairs, 4, 12.0)
+	if err != nil {
+		return nil, fmt.Sprintf("eta: %s: %s", errType(err), err.Error())
+	}
+
+	keep := make(map[string]struct{}, len(raw))
+	for cid, r := range raw {
+		if r != nil && r.Minutes != nil && *r.Minutes <= maxMinutes {
+			keep[cid] = struct{}{}
+		}
+	}
+	return keep, ""
+}
+
+// propsCampID extracts the `id` prop as a non-empty string. Falkor returns
+// scalar columns as []byte sometimes — propsMap already coerces to string,
+// but we handle int/float ids defensively too.
+func propsCampID(props map[string]any) string {
+	v, ok := props["id"]
+	if !ok || v == nil {
+		return ""
+	}
+	s := fmt.Sprintf("%v", v)
+	return s
+}
+
+// campPlaceFromProps mirrors Python's inline place computation in
+// graph_sample/graph_expand: prefer "<sido> <sigungu>" when both are
+// non-empty AND don't contain the "(미지정)" sentinel; else address; else name.
+// (Differs from usecases.placeForCamp which falls back to camp.id — Python
+// graph code does NOT.)
+func campPlaceFromProps(props map[string]any) string {
+	sido := strings.TrimSpace(propsString(props, "sido"))
+	sigungu := strings.TrimSpace(propsString(props, "sigungu"))
+	parts := []string{}
+	if sido != "" {
+		parts = append(parts, sido)
+	}
+	if sigungu != "" {
+		parts = append(parts, sigungu)
+	}
+	region := strings.TrimSpace(strings.Join(parts, " "))
+	if region != "" && !strings.Contains(region, "(미지정)") {
+		return region
+	}
+	if addr := strings.TrimSpace(propsString(props, "address")); addr != "" {
+		return addr
+	}
+	if name := strings.TrimSpace(propsString(props, "name")); name != "" {
+		return name
+	}
+	return ""
+}
+
+// propsString reads a string field from FalkorDB props, coercing []byte → string.
+func propsString(props map[string]any, key string) string {
+	v, ok := props[key]
+	if !ok || v == nil {
+		return ""
+	}
+	switch s := v.(type) {
+	case string:
+		return s
+	case []byte:
+		return string(s)
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+// propsHasLatLon — both lat AND lon must be present + non-nil (Python parity:
+// `props.get("lat") is not None and props.get("lon") is not None`).
+func propsHasLatLon(props map[string]any) bool {
+	lat, ok1 := props["lat"]
+	lon, ok2 := props["lon"]
+	return ok1 && ok2 && lat != nil && lon != nil
 }
