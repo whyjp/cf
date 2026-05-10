@@ -17,3 +17,20 @@ type VectorIndex interface {
 	SearchByEmbedding(ctx context.Context, emb []float32, k int) ([]string, error)
 	GetEmbedding(ctx context.Context, itemID string) ([]float32, error)
 }
+
+// VectorItem is one row written to the camp_embeddings table — mirrors
+// Python's `(camp_id, vec, text_hash)` tuple. Lives in ports so both the
+// write-side adapter (pgvector.Index.UpsertMany) and the use-case
+// (usecases.Reembed via VectorUpserter) can share the type without one
+// importing the other.
+type VectorItem struct {
+	CampID   string
+	Vec      []float32
+	TextHash string
+}
+
+// VectorUpserter is the write-side complement of VectorIndex consumed by the
+// /admin/reembed use-case. UpsertMany returns the count of rows processed.
+type VectorUpserter interface {
+	UpsertMany(ctx context.Context, items []VectorItem) (int, error)
+}

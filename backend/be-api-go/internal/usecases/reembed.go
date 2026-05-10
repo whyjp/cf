@@ -8,12 +8,10 @@
 // Idempotent: same camp + unchanged text_hash → re-upsert with a fresh
 // created_at (matches Python; no skip-if-unchanged optimisation in v1).
 //
-// Note on dependencies: this use-case introduces a `VectorUpserter` interface
-// here (rather than extending ports.VectorIndex) because the read-side
-// `VectorIndex` is consumed by /sites/search and we want to keep that port
-// stable across D-3 → D-6. A separate write-side adapter or a typed assert
-// in the wiring layer can satisfy `VectorUpserter` once the `camp_embeddings`
-// upsert SQL lands.
+// D-7: VectorUpserter + VectorItem moved to `ports` so the pgvector adapter
+// can implement the write-side without inverting the dep direction.
+// VectorUpserter / VectorItem are re-exported here as type aliases for
+// callers that already imported them from `usecases`.
 package usecases
 
 import (
@@ -26,19 +24,13 @@ import (
 	"github.com/whyjp/cf/be-api-go/internal/ports"
 )
 
-// VectorUpserter is the write-side complement of ports.VectorIndex used by
-// Reembed. UpsertMany returns the number of rows affected (Python parity).
-type VectorUpserter interface {
-	UpsertMany(ctx context.Context, items []VectorItem) (int, error)
-}
+// VectorUpserter is re-exported from ports (D-7 move) so existing call sites
+// that reference `usecases.VectorUpserter` keep compiling.
+type VectorUpserter = ports.VectorUpserter
 
-// VectorItem is a single row in the camp_embeddings table — same fields as
-// the Python `(camp_id, vec, text_hash)` tuple.
-type VectorItem struct {
-	CampID   string
-	Vec      []float32
-	TextHash string
-}
+// VectorItem is re-exported from ports (D-7 move) so existing call sites
+// that reference `usecases.VectorItem` keep compiling.
+type VectorItem = ports.VectorItem
 
 // Reembed wires CampReader + ReviewReader + Embedder + VectorUpserter.
 type Reembed struct {
