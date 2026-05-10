@@ -1,3 +1,9 @@
+// be-api-go entrypoint. D-1 wired healthz; D-2 adds the postgres pool,
+// CampReader adapter, ListCamps use-case, and /sites handler.
+//
+// FalkorDB and JSONL source are constructed lazily — failing to connect to
+// FalkorDB at boot does not block /sites since /sites doesn't depend on the
+// graph. (D-6 admin/graph endpoints will require it.)
 package main
 
 import (
@@ -10,8 +16,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/whyjp/cf/be-api-go/internal/adapters/postgres"
 	"github.com/whyjp/cf/be-api-go/internal/api"
 	"github.com/whyjp/cf/be-api-go/internal/settings"
+	"github.com/whyjp/cf/be-api-go/internal/usecases"
 )
 
 func main() {
@@ -21,10 +29,29 @@ func main() {
 		os.Exit(1)
 	}
 
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
+	// Postgres pool — fail fast if DSN is invalid, but keep going if the DB
+	// is currently down (the pool will reconnect lazily).
+	pool, err := postgres.NewPool(rootCtx, cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("postgres pool", "err", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	// Wire CampReader → ListCamps → SitesHandler.
+	campRepo := postgres.NewCampRepo(pool)
+	listCamps := usecases.NewListCamps(campRepo)
+	handlers := &api.Handlers{
+		Sites: api.NewSitesHandler(listCamps),
+	}
+
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.NewRouter(),
+		Handler:      api.NewRouter(handlers),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
