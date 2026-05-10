@@ -32,13 +32,23 @@ class ExtractDescSignals:
     signal_writer: DescSignalWriter
     encode_batch_size: int = 64
 
-    def execute(self, *, top_k: int = 10, min_score: float = 0.3) -> int:
-        # Pass 1 — collect (camp, text) pairs.  Building the embed-text reads
-        # the top-N reviews per camp from PG; each call uses one pooled
-        # connection so this stays bounded by the pool size.
+    def execute(
+        self,
+        *,
+        top_k: int = 10,
+        min_score: float = 0.3,
+        ids: list[str] | None = None,
+    ) -> int:
+        # Pass 1 — collect (camp, text) pairs. ids=[...] limits to those camps
+        # only (incremental, paired with ingest_camps --incremental's new_ids).
+        camp_iter = (
+            self.camp_reader.iter_since(ids=ids)
+            if ids
+            else self.camp_reader.iter_all()
+        )
         camps = []
         texts: list[str] = []
-        for camp in self.camp_reader.iter_all():
+        for camp in camp_iter:
             top = list(self.review_reader.top_for(camp.id, n=5))
             camps.append(camp)
             texts.append(build_embed_text(camp, top))
