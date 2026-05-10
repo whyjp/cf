@@ -41,9 +41,27 @@ bash scripts/db-seed-load.sh --force   # 강제 재로드
 - `db-seed-load.sh` 가 sentinel `.run/seed-loaded` + `camps` 테이블 카운트 둘 다 검사. 이미 로드된 환경에서 재실행해도 안전 (`--force` 미지정 시 skip).
 - `db-dump.sh` 는 같은 디렉터리에 매번 덮어쓰기.
 
-## Transport
+## Transport — Self-hosted prod (docker)
 ```sh
-# Dev → Prod
 rsync -avz seed/latest/ user@prod:/path/to/cf/seed/latest/
 ssh user@prod 'cd /path/to/cf && bash scripts/db-seed-load.sh'
 ```
+
+## Transport — Managed Postgres (Render / Supabase / RDS)
+```sh
+export DATABASE_URL='postgresql://USER:PASS@HOST/DB?sslmode=require'
+bash scripts/db-seed-load-url.sh
+
+# 또는 인자로:
+bash scripts/db-seed-load-url.sh "postgresql://..."
+```
+
+호환성:
+- ✅ Render Postgres (pg 15+, pgvector 자동)
+- ✅ Supabase (pgvector 대시보드 또는 자동 enable)
+- ✅ AWS RDS / GCP Cloud SQL (pgvector pre-installed)
+- 옵션 `--no-owner --no-acl` 자동 적용 (cloud non-superuser 친화)
+- ⚠️ falkordb 는 managed 없음 — 별도 호스트 필요 (Render Web Service docker 또는 self-hosted VM)
+- 필요 권한: 대상 role 이 `CREATE / DROP` + `CREATE EXTENSION` 가능
+
+Idempotency: `camps` 카운트 > 0 시 skip (override: `FORCE=1 bash scripts/db-seed-load-url.sh`).
