@@ -94,7 +94,9 @@ func (r *RouterProvider) DriveEtaBatch(
 		d := d
 		if d.Place == "" {
 			msg := "empty place"
+			mu.Lock()
 			out[d.ID] = &domain.EtaResult{Origin: origin, Dest: d.Place, Error: &msg}
+			mu.Unlock()
 			continue
 		}
 		sem <- struct{}{}
