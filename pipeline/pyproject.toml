@@ -5,32 +5,53 @@ build-backend = "hatchling.build"
 [project]
 name = "cf-pipeline"
 version = "0.1.0"
-description = "cf post-crawl pipeline — jsonl → postgres → falkor + etago geocode + lexicon/seed."
+description = "cf post-crawl pipeline — jsonl → postgres → falkor + etago geocode + lexicon/seed. SP-D D-9: also ships the cf_be_api Python core (Container/Settings/domain/ports/adapters/usecases) consumed by ETL."
 requires-python = ">=3.11"
 authors = [{ name = "cxx_2" }]
 license = { text = "MIT" }
 readme = "README.md"
 
 dependencies = [
-    # SP-D D-8 cutover: cf-be-api → cf-be-api-py (HTTP layer dropped, Python
-    # import path `cf_be_api` unchanged). pipeline still uses the Container,
-    # Settings, domain models, and use-case classes for one-shot ETL.
-    "cf-be-api-py",
+    # cf_pipeline CLI deps
     "typer>=0.12",
     "loguru>=0.7",
-    "pydantic>=2.7",
     "rich>=13.7",
+    # SP-D D-9 (2026-05-11): cf_be_api absorbed from backend/be-api-py/ —
+    # its dependencies (DB, ETL, embeddings, html parsing) are now declared
+    # directly here so cf_pipeline + cf_be_api can be installed as one wheel.
+    # FastAPI/uvicorn intentionally absent — HTTP runtime is now Go (be-api/).
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "falkordb>=1.0.10",
+    "tenacity>=8.2",
+    "psycopg[binary,pool]>=3.2",
+    "sqlalchemy>=2.0",
+    "pgvector>=0.3.0",
+    "alembic>=1.13",
+    "sentence-transformers>=3.0",
+    "scikit-learn>=1.5",
+    "numpy>=1.26",
+    "lxml>=5.2",
+    "selectolax>=0.3.21",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.2", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "respx>=0.21"]
+testcontainers = ["testcontainers[postgres]>=4.7"]
 
 [project.scripts]
 cf-pipeline = "cf_pipeline.full_run:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cf_pipeline"]
+# Two packages built from this distribution: the pipeline CLI + the absorbed
+# cf_be_api core. Import paths (`cf_pipeline.*`, `cf_be_api.*`) are unchanged
+# from D-8.
+packages = ["src/cf_pipeline", "src/cf_be_api"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests", "tests-be-api-legacy"]
+markers = [
+    "integration: marks tests as integration tests that require a live docker stack",
+]

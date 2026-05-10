@@ -5,7 +5,6 @@ requires-python = ">=3.11"
 [manifest]
 members = [
     "camfit-crawl",
-    "cf-be-api-py",
     "cf-be-for-fe",
     "cf-pipeline",
     "cf-workspace",
@@ -118,64 +117,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cf-be-api-py"
-version = "0.1.0"
-source = { editable = "backend/be-api-py" }
-dependencies = [
-    { name = "alembic" },
-    { name = "falkordb" },
-    { name = "httpx" },
-    { name = "loguru" },
-    { name = "lxml" },
-    { name = "numpy" },
-    { name = "pgvector" },
-    { name = "psycopg", extra = ["binary", "pool"] },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "rich" },
-    { name = "scikit-learn" },
-    { name = "selectolax" },
-    { name = "sentence-transformers" },
-    { name = "sqlalchemy" },
-    { name = "tenacity" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "respx" },
-]
-testcontainers = [
-    { name = "testcontainers" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.13" },
-    { name = "falkordb", specifier = ">=1.0.10" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "loguru", specifier = ">=0.7" },
-    { name = "lxml", specifier = ">=5.2" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "pgvector", specifier = ">=0.3.0" },
-    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "pydantic-settings", specifier = ">=2.4" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
-    { name = "rich", specifier = ">=13.7" },
-    { name = "scikit-learn", specifier = ">=1.5" },
-    { name = "selectolax", specifier = ">=0.3.21" },
-    { name = "sentence-transformers", specifier = ">=3.0" },
-    { name = "sqlalchemy", specifier = ">=2.0" },
-    { name = "tenacity", specifier = ">=8.2" },
-    { name = "testcontainers", extras = ["postgres"], marker = "extra == 'testcontainers'", specifier = ">=4.7" },
-]
-provides-extras = ["dev", "testcontainers"]
-
-[[package]]
 name = "cf-be-for-fe"
 version = "0.1.0"
 source = { editable = "backend/be-for-fe" }
@@ -210,10 +151,22 @@ name = "cf-pipeline"
 version = "0.1.0"
 source = { editable = "pipeline" }
 dependencies = [
-    { name = "cf-be-api-py" },
+    { name = "alembic" },
+    { name = "falkordb" },
+    { name = "httpx" },
     { name = "loguru" },
+    { name = "lxml" },
+    { name = "numpy" },
+    { name = "pgvector" },
+    { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
     { name = "rich" },
+    { name = "scikit-learn" },
+    { name = "selectolax" },
+    { name = "sentence-transformers" },
+    { name = "sqlalchemy" },
+    { name = "tenacity" },
     { name = "typer" },
 ]
 
@@ -221,19 +174,37 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "respx" },
+]
+testcontainers = [
+    { name = "testcontainers" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "cf-be-api-py", editable = "backend/be-api-py" },
+    { name = "alembic", specifier = ">=1.13" },
+    { name = "falkordb", specifier = ">=1.0.10" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "loguru", specifier = ">=0.7" },
+    { name = "lxml", specifier = ">=5.2" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "pgvector", specifier = ">=0.3.0" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.7" },
+    { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
     { name = "rich", specifier = ">=13.7" },
+    { name = "scikit-learn", specifier = ">=1.5" },
+    { name = "selectolax", specifier = ">=0.3.21" },
+    { name = "sentence-transformers", specifier = ">=3.0" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "tenacity", specifier = ">=8.2" },
+    { name = "testcontainers", extras = ["postgres"], marker = "extra == 'testcontainers'", specifier = ">=4.7" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "testcontainers"]
 
 [[package]]
 name = "cf-workspace"
