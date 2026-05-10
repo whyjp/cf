@@ -12,7 +12,7 @@ license = { text = "MIT" }
 readme = "README.md"
 
 dependencies = [
-    "cf-backend",
+    "cf-be-api",
     "typer>=0.12",
     "loguru>=0.7",
     "pydantic>=2.7",

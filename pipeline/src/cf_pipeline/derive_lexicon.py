@@ -14,7 +14,7 @@ use RELATIVE percentile thresholds (p80 = positive, p20 = negative) rather
 than absolute cut-offs.
 
 Output is written to:
-    src/cf_backend/domain/intensifier_lexicon.py
+    src/cf_be_api/domain/intensifier_lexicon.py
 
 Re-running on the same corpus produces identical output (deterministic).
 """
@@ -271,7 +271,7 @@ def main() -> None:
         type=Path,
         default=Path(__file__).parent.parent
         / "src"
-        / "cf_backend"
+        / "cf_be_api"
         / "domain"
         / "intensifier_lexicon.py",
         help="Output Python file path",
