@@ -17,6 +17,10 @@ import type { Site } from "../../shared/types";
  * markercluster 도 같은 CDN 을 통해 L.markerClusterGroup 으로 제공.
  */
 
+// Leaflet is loaded via CDN (see index.html / m.html <head>) instead of npm
+// import. The leaflet.markercluster plugin's CSS uses background-image: url(...)
+// paths relative to the CDN base; switching to npm import breaks these paths.
+// `declare const L: any` is the intentional, well-considered tradeoff.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const L: any;
 

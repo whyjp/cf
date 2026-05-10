@@ -194,9 +194,16 @@ def eta_cache_clear() -> dict:
 MOBILE_UA_RE = re.compile(r"Mobi|Android|iPhone|iPad|iPod", re.I)
 
 
-@app.get("/", include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def root_redirect(request: Request):
-    """UA + cookie 기반 진입 라우팅 (C5)."""
+    """UA + cookie 기반 진입 라우팅 (C5).
+
+    HEAD 도 명시적으로 매칭 — 기본 `@app.get` 만 두면 HEAD 요청은 아래
+    `app.mount("/", StaticFiles)` catch-all 로 흘러가 index.html 의 200 헤더만
+    돌려준다. monitoring/health-probe (`curl -I`) 가 302 redirect 를 못 봐서
+    UA-routing 이 실제로 작동하는지 확인이 안 됨. methods=["GET","HEAD"] 로
+    동일 핸들러가 양쪽을 처리하면 HEAD 도 redirect/200 을 정확히 반환한다.
+    """
     ua = request.headers.get("user-agent", "")
     is_mobile_ua = bool(MOBILE_UA_RE.search(ua))
     prefer_desktop = request.cookies.get("prefer_desktop") == "1"

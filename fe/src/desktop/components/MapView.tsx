@@ -15,6 +15,10 @@ import type { FeaturedAxis, Site, EtaResult, UserCoords, UserLocStatus } from ".
  * would silently break those images. Plan B5 cleanup may revisit.
  */
 
+// Leaflet is loaded via CDN (see index.html / m.html <head>) instead of npm
+// import. The leaflet.markercluster plugin's CSS uses background-image: url(...)
+// paths relative to the CDN base; switching to npm import breaks these paths.
+// `declare const L: any` is the intentional, well-considered tradeoff.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const L: any;
 
