@@ -3,12 +3,15 @@
 - A2: 얇은 통과 (facets/concepts/themes/marks/featured-axes)
 - A3: /sites* 라우팅 + projection (be-api 가 raw Camp dict 반환 → BFF 가 fe-row 로 가공)
 - A4: /eta* 통과 (단일/배치/캐시 무효화)
+- C5: UA-based "/" 라우팅 — 모바일 UA + !prefer_desktop → /m.html 302
 """
 from __future__ import annotations
+import re
 from typing import Optional, Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -176,6 +179,39 @@ def eta_cache_clear() -> dict:
         return _client.delete("/eta/cache")
     except BeApiError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+
+
+# ───────────────────────── C5: "/" UA-based routing ───────────────────────
+#
+# Mobile UA + no prefer_desktop cookie → 302 /m.html
+# Desktop UA + prefer_mobile cookie    → 302 /m.html
+# Else → FileResponse fe/dist/index.html
+#
+# ⚠️ Order: this `@app.get("/")` MUST come BEFORE `app.mount("/", StaticFiles)`
+# below. The StaticFiles catch-all otherwise wins for "/" and "Mobi" UAs would
+# always hit the desktop bundle.
+
+MOBILE_UA_RE = re.compile(r"Mobi|Android|iPhone|iPad|iPod", re.I)
+
+
+@app.get("/", include_in_schema=False)
+def root_redirect(request: Request):
+    """UA + cookie 기반 진입 라우팅 (C5)."""
+    ua = request.headers.get("user-agent", "")
+    is_mobile_ua = bool(MOBILE_UA_RE.search(ua))
+    prefer_desktop = request.cookies.get("prefer_desktop") == "1"
+    prefer_mobile = request.cookies.get("prefer_mobile") == "1"
+
+    if is_mobile_ua and not prefer_desktop:
+        return RedirectResponse("/m.html", status_code=302)
+    if not is_mobile_ua and prefer_mobile:
+        return RedirectResponse("/m.html", status_code=302)
+
+    index = _settings.fe_dir / "index.html"
+    if not index.is_file():
+        # fe/dist 가 아직 없는 환경 — 503 으로 빌드 필요 신호
+        raise HTTPException(status_code=503, detail="fe/dist/index.html not built yet")
+    return FileResponse(index)
 
 
 # ───────────────────────── FE static mount (SP-B B4) ─────────────────────
