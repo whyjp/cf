@@ -2,7 +2,7 @@
 
 - A2: 얇은 통과 (facets/concepts/themes/marks/featured-axes)
 - A3: /sites* 라우팅 + projection (be-api 가 raw Camp dict 반환 → BFF 가 fe-row 로 가공)
-- A4: /eta* 통과 (예정)
+- A4: /eta* 통과 (단일/배치/캐시 무효화)
 """
 from __future__ import annotations
 from typing import Optional, Any
@@ -10,6 +10,7 @@ from typing import Optional, Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from .settings import Settings
 from .client import BeApiClient, BeApiError
@@ -136,6 +137,45 @@ def site_similar(site_id: str, k: int = 10) -> list[dict]:
 def site_detail(site_id: str) -> dict:
     raw = _passthrough_get(f"/sites/{site_id}")
     return project_site_detail(raw)
+
+
+# ───────────────────────── /eta* — A4 통과 ───────────────────────────────
+#
+# be-api 의 /eta* 시그니처를 그대로 미러. origin/dest 는 *문자열 주소* (etago
+# 가 직접 받아쓰는 형식). 본문 가공 없음 — fe 는 be-api 응답 형태를 동일하게
+# 받음. EtaBatchRequest 는 be-api 의 동일 클래스와 필드/제약 일치.
+
+class EtaBatchRequest(BaseModel):
+    origin: str = Field(..., min_length=1)
+    ids: list[str] = Field(..., min_length=1, max_length=10000)
+    max_minutes: Optional[int] = Field(None, ge=1, le=1440)
+    concurrency: int = Field(4, ge=1, le=12)
+    timeout_s: float = Field(12.0, ge=2.0, le=60.0)
+
+
+@app.get("/eta")
+def eta_one(
+    origin: str = Query(..., min_length=1),
+    dest: str = Query(..., min_length=1),
+    timeout_s: float = Query(12.0, ge=2.0, le=60.0),
+) -> dict:
+    return _passthrough_get("/eta", origin=origin, dest=dest, timeout_s=timeout_s)
+
+
+@app.post("/eta/batch")
+def eta_batch(req: EtaBatchRequest) -> dict:
+    try:
+        return _client.post_json("/eta/batch", req.model_dump())
+    except BeApiError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
+@app.delete("/eta/cache")
+def eta_cache_clear() -> dict:
+    try:
+        return _client.delete("/eta/cache")
+    except BeApiError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
 
 
 # ───────────────────────── FE static mount (SP-B B4) ─────────────────────

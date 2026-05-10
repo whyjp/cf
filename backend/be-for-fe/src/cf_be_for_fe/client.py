@@ -52,6 +52,13 @@ class BeApiClient:
         return r.json()
 
     def delete(self, path: str) -> Any:
-        r = self._client.delete(path)
+        try:
+            r = self._client.delete(path)
+        except httpx.TimeoutException as e:
+            raise BeApiError(f"timeout calling {path}") from e
+        except httpx.HTTPError as e:
+            raise BeApiError(f"http error calling {path}: {e}") from e
+        if r.status_code >= 500:
+            raise BeApiError(f"be-api {r.status_code} on {path}", status=r.status_code)
         r.raise_for_status()
         return r.json() if r.text else {}
