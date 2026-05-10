@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cf-pipeline"
+version = "0.1.0"
+description = "cf post-crawl pipeline — jsonl → postgres → falkor + etago geocode + lexicon/seed."
+requires-python = ">=3.11"
+authors = [{ name = "cxx_2" }]
+license = { text = "MIT" }
+readme = "README.md"
+
+dependencies = [
+    "cf-backend",
+    "typer>=0.12",
+    "loguru>=0.7",
+    "pydantic>=2.7",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+cf-pipeline = "cf_pipeline.full_run:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cf_pipeline"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
