@@ -48,8 +48,10 @@ class RebuildGraph:
                 "lat": camp.geo.lat if camp.geo else None,
                 "lon": camp.geo.lon if camp.geo else None,
                 "url": camp.url,
+                "detail_url": camp.detail_url,
                 "addr": camp.address,
                 "desc": camp.description,
+                "source": camp.source,
                 "sido": camp.region.sido,
                 "sigungu": camp.region.sigungu,
                 "types": camp.types,
@@ -62,7 +64,8 @@ class RebuildGraph:
                 """
                 MERGE (c:Camp {id:$id})
                 SET c.name=$name, c.lat=$lat, c.lon=$lon, c.url=$url,
-                    c.address=$addr, c.description=$desc
+                    c.detail_url=$detail_url,
+                    c.address=$addr, c.description=$desc, c.source=$source
                 MERGE (r:Region {sido:$sido, sigungu:$sigungu})
                 MERGE (c)-[:LOCATED_IN]->(r)
                 FOREACH (t IN $types | MERGE (cat:Category {name:t}) MERGE (c)-[:HAS_CATEGORY]->(cat))

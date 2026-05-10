@@ -47,6 +47,10 @@ class Camp(BaseModel):
     bookmark_count: int = 0
     url: Optional[str] = None
     source: str = "camfit"
+    # Detail page URL on the source site — clickable for users to reach the
+    # camp's info / reservation page on the original platform. Mapper-set per
+    # source (camfit: /place/{id}, txcp: /resv/view.hbb?cseq={remarkid}).
+    detail_url: Optional[str] = None
     photos: list[Photo] = []
 
 
