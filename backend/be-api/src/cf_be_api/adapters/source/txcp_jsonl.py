@@ -35,6 +35,21 @@ _SITE_TP_LABEL = {
     "BB006": "피크닉",
 }
 
+# camping site_tp codes — records lacking ALL of these and having BB003 (pension)
+# are filtered out at iter_summaries. See user directive 2026-05-10:
+# "캠핑장이외의 펜션데이터는 파이프라인 처리하지않는다".
+_CAMPING_SITE_TPS = frozenset({"BB000", "BB001", "BB002", "BB006"})
+
+
+def _is_pension_only(raw: dict) -> bool:
+    """True if this record is BB003 (펜션) and has no camping code.
+
+    KEEP if: any camping code present, OR site_tp empty/unknown (안전).
+    DROP if: BB003 in codes AND no camping code.
+    """
+    codes = set(raw.get("site_tp_codes") or [])
+    return "BB003" in codes and not (codes & _CAMPING_SITE_TPS)
+
 
 class TxcpJsonlSource:
     """DataSource adapter for txcp camps.jsonl.
@@ -74,6 +89,9 @@ class TxcpJsonlSource:
 
     def iter_summaries(self) -> Iterator[Camp]:
         for raw in self._records.values():
+            if _is_pension_only(raw):
+                # 펜션 only -- pipeline 처리 제외 (사용자 directive 2026-05-10)
+                continue
             yield self._to_camp(raw)
 
     def get_detail(self, camp_id: str) -> Optional[Camp]:

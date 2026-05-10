@@ -210,3 +210,37 @@ def test_get_detail_robust_to_corrupt_details_json(txcp_data_dir):
     camp = src.get_detail("txcp:16706")
     assert camp is not None
     assert camp.contact is None  # no enrichment happened
+
+
+def test_pension_only_records_excluded_from_iter_summaries(tmp_path):
+    """User directive 2026-05-10: 펜션 only 데이터는 파이프라인 처리 제외.
+
+    Filter rule: BB003 in site_tp_codes AND no camping code (BB000/001/002/006).
+    """
+    d = tmp_path / "txcp_pension"
+    d.mkdir()
+    records = [
+        {"id": "100", "name": "캠핑+펜션 겸업", "region_sido": "강원", "region_sigungu": "춘천",
+         "site_tp_codes": ["BB000", "BB003"]},   # camping + pension → KEEP
+        {"id": "200", "name": "글램핑만", "region_sido": "강원", "region_sigungu": "평창",
+         "site_tp_codes": ["BB001"]},             # camping → KEEP
+        {"id": "300", "name": "펜션 only", "region_sido": "제주", "region_sigungu": "서귀포",
+         "site_tp_codes": ["BB003"]},             # pension only → DROP
+        {"id": "400", "name": "펜션 + unknown", "region_sido": "제주", "region_sigungu": "제주시",
+         "site_tp_codes": ["BB003", "BB008"]},    # pension + unknown, no camping → DROP
+        {"id": "500", "name": "no site_tp", "region_sido": "경기", "region_sigungu": "가평",
+         "site_tp_codes": []},                    # empty → KEEP (safe)
+        {"id": "600", "name": "unknown only", "region_sido": "강원", "region_sigungu": "양양",
+         "site_tp_codes": ["BB008"]},             # unknown only → KEEP (safe)
+        {"id": "700", "name": "피크닉 only", "region_sido": "경기", "region_sigungu": "가평",
+         "site_tp_codes": ["BB006"]},             # camping (피크닉) → KEEP
+    ]
+    (d / "camps.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in records),
+        encoding="utf-8",
+    )
+    src = TxcpJsonlSource(d)
+    yielded = {c.id for c in src.iter_summaries()}
+    assert yielded == {"txcp:100", "txcp:200", "txcp:500", "txcp:600", "txcp:700"}
+    assert "txcp:300" not in yielded
+    assert "txcp:400" not in yielded
