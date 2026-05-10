@@ -1,19 +1,21 @@
-"""FastAPI read API consumed by fe/index.html.
+"""FastAPI read API consumed by the BFF (cf-be-for-fe).
 
 All handlers depend on `Container` (composition root) — never on concrete
 adapters. PG is the truth; FalkorDB is the derived graph; semantic search uses
 pgvector.
 
 RocksDB removed in T36. ROCKS_BASE / camp:* / detail:* / reviews:* keys gone.
+
+SP-B B4: be-api is now a pure read API — no static file serving. The BFF
+(cf-be-for-fe) mounts fe/dist/ at "/". Browsers should hit the BFF, not this
+service. This service runs on :8071 (internal) by default.
 """
 from __future__ import annotations
-from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .settings import Settings
@@ -835,17 +837,5 @@ def graph_search(
     return {"nodes": list(nodes.values()), "edges": []}
 
 
-# ───────────────────────── FE static mount ─────────────────────
-
-fe_path = _settings.fe_dir
-
-
-# SP-B B1 임시: 새 fe/index.html 은 Vite placeholder. B1~B3 동안에는 사용자
-# 트래픽을 legacy (CDN+Babel) 로 보낸다. B4 mount 전환에서 정리(삭제) 예정.
-@app.get("/", include_in_schema=False)
-def temp_root() -> FileResponse:
-    return FileResponse(fe_path / "index.legacy.html")
-
-
-if fe_path.is_dir():
-    app.mount("/", StaticFiles(directory=str(fe_path), html=True), name="fe")
+# SP-B B4: static FE mount removed. The BFF (cf-be-for-fe) serves fe/dist/.
+# This service is API-only; "/" returns 404. Use /healthz to liveness-check.

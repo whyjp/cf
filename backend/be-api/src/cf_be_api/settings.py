@@ -36,9 +36,9 @@ class Settings(BaseSettings):
     eta_provider: Literal["etago", "mock"] = "etago"
 
     # NOTE: post SP-A A1 directory move adds one level (backend/be-api/src/cf_be_api).
-    # parents[4] = repo root (cf/) where fe/ lives.
-    # parents[3] = backend/ (legacy data/ relative anchor — preserved for parity).
-    fe_dir: Path = Path(__file__).resolve().parents[4] / "fe"
+    # SP-B B4 dropped `fe_dir` here — be-api no longer serves static files;
+    # the BFF (cf-be-for-fe) owns fe/dist/. data_dir kept for legacy parity.
+    # parents[3] = backend/ (legacy data/ relative anchor).
     data_dir: Path = Path(__file__).resolve().parents[3] / "data"
 
     log_level: str = "INFO"
