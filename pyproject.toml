@@ -5,7 +5,8 @@ description = "cf monorepo — crawl/{camfit,txcp} + backend + pipeline (uv work
 requires-python = ">=3.11"
 
 [tool.uv.workspace]
-members = ["crawl/txcp", "crawl/camfit", "backend/be-api", "pipeline"]
+members = ["crawl/txcp", "crawl/camfit", "backend/be-api", "backend/be-for-fe", "pipeline"]
 
 [tool.uv.sources]
 cf-be-api = { workspace = true }
+cf-be-for-fe = { workspace = true }
