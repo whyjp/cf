@@ -92,195 +92,43 @@ def healthz() -> dict:
 
 @app.get("/sites/search")
 def site_search(q: str = Query(..., min_length=1), k: int = 20) -> list[dict]:
-    """Semantic search over camp embeddings."""
+    """Semantic search over camp embeddings.
+
+    SP-A A3: returns raw Camp domain dicts (Camp.model_dump()). FE-friendly
+    projection moved to cf_be_for_fe (BFF).
+    """
     if not q.strip():
         return []
     camps = _container.semantic_search().execute(q.strip(), k=max(1, min(k, 100)))
-    return [_camp_to_fe_row(c) for c in camps]
+    return [c.model_dump() for c in camps]
 
 
 @app.get("/sites/{site_id}/similar")
 def site_similar(site_id: str, k: int = 10) -> list[dict]:
-    """KNN nearest-neighbor camps to the given camp."""
+    """KNN nearest-neighbor camps to the given camp.
+
+    SP-A A3: returns raw Camp domain dicts. Projection lives in BFF.
+    """
     vec = _container.vector.get(site_id)
     if vec is None:
         raise HTTPException(404, f"no embedding for camp {site_id}; run BuildEmbeddings first")
     hits = _container.vector.knn(vec, k=k + 1)  # +1 to exclude self
     other_ids = [cid for cid, _ in hits if cid != site_id][:k]
     by_id = {c.id: c for c in _container.camps_read.list_filtered(ids=other_ids)}
-    return [_camp_to_fe_row(by_id[cid]) for cid in other_ids if cid in by_id]
+    return [by_id[cid].model_dump() for cid in other_ids if cid in by_id]
 
 
 @app.get("/sites/{site_id}")
 def site_detail(site_id: str) -> dict:
+    """Aggregated site detail (camp + reviews + concepts + theme).
+
+    SP-A A3: returns the raw use-case dict (camp.model_dump() inside).
+    The fe-friendly flat camelCase projection lives in BFF.
+    """
     try:
-        d = _container.get_site_detail().execute(site_id)
+        return _container.get_site_detail().execute(site_id)
     except CampNotFound:
         raise HTTPException(404, f"camp not found: {site_id}")
-    # FE DetailPanel reads flat camelCase + flat region/geo. Project here so
-    # the use-case stays canonical (Camp domain shape) while the FE stays terse.
-    camp = d.get("camp") or {}
-    geo = camp.get("geo") or {}
-    region = camp.get("region") or {}
-    photos = camp.get("photos") or []
-    sido = region.get("sido")
-    flat = {
-        "id": camp.get("id"),
-        "name": camp.get("name"),
-        "address": camp.get("address"),
-        "lat": geo.get("lat"),
-        "lon": geo.get("lon"),
-        "region_sido": sido,
-        "region_sigungu": region.get("sigungu"),
-        "categories": _filter_maritime_for_inland(
-            _project_categories(camp.get("collections"), camp.get("types")), sido,
-        ),
-        "facilities": list(camp.get("facilities") or []) + list(camp.get("additional_facilities") or []),
-        "hashtags": _filter_maritime_for_inland(camp.get("hashtags") or [], sido),
-        "description": camp.get("description"),
-        "brief": camp.get("brief"),
-        "locationBrief": camp.get("location_brief"),
-        "contact": camp.get("contact"),
-        "priceStartFrom": camp.get("price_start_from"),
-        "priceEndTo": camp.get("price_end_to"),
-        "numOfReviews": camp.get("num_of_reviews"),
-        "bookmarkCount": camp.get("bookmark_count"),
-        "url": camp.get("url"),
-        "photos": [
-            {"url": p.get("url"), "thumb": p.get("thumb_url") or p.get("url")}
-            for p in photos
-        ],
-        "reviews_total": d.get("reviews_total"),
-        "reviews_top": [
-            {
-                "user": r.get("user_nick"),
-                "season": r.get("season"),
-                "userType": r.get("user_type"),
-                "numOfDays": r.get("num_of_days"),
-                "score": r.get("score"),
-                "text": r.get("text"),
-            }
-            for r in (d.get("reviews_top") or [])
-        ],
-        "concepts": d.get("concepts") or [],
-        "theme": d.get("theme"),
-    }
-    return flat
-
-
-# English camp-type codes from camfit's source data → Korean labels.
-# Unknown codes pass through unchanged (better to surface than to drop).
-_TYPE_KO = {
-    "autoCamping": "오토캠핑", "pension": "펜션", "glamping": "글램핑",
-    "caravan": "카라반", "bungalow": "방갈로", "rental": "렌탈",
-    "carCamping": "차박", "experience": "체험", "trailer": "트레일러",
-}
-
-
-# Sido (광역) values that have NO coastline — every camp here is purely
-# inland. Camfit's source data sometimes tags lake-side camps as "ocean"
-# and lake-island camps as "island" (e.g. 청풍호반 오토캠핑장 in 충북
-# carries locationTypes=['lake','mountain','forest','river','ocean']).
-# We drop maritime tags for these sidos at the FE projection layer.
-_LANDLOCKED_SIDO = frozenset({
-    "충북", "충청북도",
-    "대전", "대전광역시",
-    "세종", "세종특별자치시",
-    "광주", "광주광역시",
-    "대구", "대구광역시",
-    "서울", "서울특별시",
-})
-
-# Substrings that indicate a maritime claim — collection names like
-# "콜렉션:오션뷰 캠핑장" or hashtags like "바다캠핑장" get filtered out
-# of `r.categories` when the camp's sido has no coast.
-_MARITIME_TOKENS = ("오션", "바다", "섬캠", "해변", "해안")
-
-
-def _filter_maritime_for_inland(items, sido) -> list:
-    """Drop maritime-flavoured items when the camp sits in a landlocked sido."""
-    if not items or not sido or sido not in _LANDLOCKED_SIDO:
-        return list(items or [])
-    return [s for s in items if not any(tok in s for tok in _MARITIME_TOKENS)]
-
-
-def _filter_location_types_for_inland(loc_types, sido) -> list:
-    """Drop ocean/island tags when the camp sits in a landlocked sido."""
-    if not loc_types or not sido or sido not in _LANDLOCKED_SIDO:
-        return list(loc_types or [])
-    return [t for t in loc_types if t not in ("ocean", "island")]
-
-
-def _project_categories(collections, types) -> list[str]:
-    """Compose the FE-facing `categories` chip list from camp.collections +
-    camp.types. Three opaque crawler-discovery prefixes are dropped:
-      - 전시:E*    camfit editorial bucket IDs (>500 camps each)
-      - 시군구:*  admin-region path stamps from the crawler
-      - 검색:*    keyword-search discovery stamps
-    Camp types are translated to Korean.
-    """
-    raw = list(collections or []) + [_TYPE_KO.get(t, t) for t in (types or [])]
-    return [
-        s for s in raw
-        if not s.startswith("전시:")
-        and not s.startswith("시군구:")
-        and not s.startswith("검색:")
-    ]
-
-
-def _camp_to_fe_row(c) -> dict:
-    """FE-friendly flat projection of a Camp domain model.
-
-    The map view in fe/index.html reads `r.lat`/`r.lon`/`r.sido` directly
-    (no `.geo.lat` traversal), and the chip rendering iterates `r.categories`.
-
-    Boolean axis flags `has_<id>` are generated dynamically from the
-    `domain.featured_axes.FEATURED_AXES` registry — adding a new axis there
-    surfaces it on every row without further edits to this function. Each
-    axis matches case-insensitive substrings against a haystack joined from
-    every meaningful tag source plus description + brief (free-form text
-    is where seasonal/event keywords like 할로윈/단풍 actually live).
-    """
-    geo = c.geo
-    region = c.region
-    sido = region.sido if region else None
-    cats = _filter_maritime_for_inland(c.collections or [], sido)
-    facs = list(c.facilities or []) + list(c.additional_facilities or [])
-    types = list(c.types or [])
-    location_types = _filter_location_types_for_inland(c.location_types or [], sido)
-    hashtags = _filter_maritime_for_inland(c.hashtags or [], sido)
-
-    # Search corpus for the boolean axis flags — every meaningful tag source
-    # joined into one lowercased blob for substring matching. description+
-    # brief join is what lets 할로윈/단풍 (mostly description-bound) light up.
-    haystack = " ".join(
-        cats + types + facs + location_types + hashtags
-        + [c.description or "", c.brief or ""]
-    ).lower()
-
-    def _matches(*needles: str) -> bool:
-        return any(n.lower() in haystack for n in needles)
-
-    row = {
-        "id": c.id,
-        "name": c.name,
-        "sido": sido,
-        "sigungu": region.sigungu if region else None,
-        "address": c.address,
-        "lat": geo.lat if geo else None,
-        "lon": geo.lon if geo else None,
-        "categories": _project_categories(cats, types),
-        "facilities": facs,
-        "location_types": location_types,
-        "hashtags": hashtags,
-        "num_of_reviews": c.num_of_reviews,
-        "bookmark_count": c.bookmark_count,
-        "url": c.url,
-    }
-    # Dynamic has_<id> derivation from the featured-axis registry.
-    for axis in FEATURED_AXES:
-        row[f"has_{axis['id']}"] = _matches(*axis["keywords"])
-    return row
 
 
 @app.get("/sites")
@@ -294,6 +142,7 @@ def sites(
     bbox: Optional[str] = Query(None, description="lon1,lat1,lon2,lat2"),
     limit: int = 2000,
 ) -> list[dict]:
+    """Filtered camp list. SP-A A3: returns raw Camp dicts; projection in BFF."""
     bb: Optional[tuple[float, float, float, float]] = None
     if bbox:
         try:
@@ -309,7 +158,7 @@ def sites(
         min_score=min_score, max_score=max_score,
         bbox=bb, limit=limit,
     )
-    return [_camp_to_fe_row(c) for c in rows]
+    return [c.model_dump() for c in rows]
 
 
 # ───────────────────────── Featured axes ─────────────────────
@@ -318,7 +167,8 @@ def sites(
 def featured_axes() -> list[dict]:
     """FE-facing chip metadata for the 대표축 row. The `keywords` field is
     intentionally omitted — only id/ko/icon/tone are needed for rendering;
-    the actual matching happens server-side in `_camp_to_fe_row`.
+    the actual matching happens in the BFF projection layer
+    (`cf_be_for_fe.projection.camp_to_fe_row`) since SP-A A3.
 
     Adding a new axis: edit `domain/featured_axes.py` and restart. The FE
     refetches this endpoint at mount and renders the new chip automatically.
