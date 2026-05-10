@@ -75,3 +75,15 @@ def test_android_ua_redirects(client):
 def test_empty_ua_serves_index(client):
     r = client.get("/", headers={"user-agent": ""})
     assert r.status_code == 200
+
+
+def test_head_mobile_ua_redirects_to_m_html(client):
+    """HEAD `/` from mobile UA must also 302 — monitoring tools use HEAD.
+
+    Pre-fix: `@app.get("/")` only matched GET, so HEAD bypassed the redirect
+    handler and hit StaticFiles → 200 (index.html headers). Now api_route
+    with methods=["GET","HEAD"] catches both.
+    """
+    r = client.head("/", headers={"user-agent": IPHONE_UA})
+    assert r.status_code == 302
+    assert r.headers["location"] == "/m.html"
