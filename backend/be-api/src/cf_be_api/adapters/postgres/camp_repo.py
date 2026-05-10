@@ -10,7 +10,7 @@ from .pool import PostgresPool
 _LIST_FIELDS = (
     "id, name, sido, sigungu, address, lat, lon, brief, location_brief, contact, "
     "price_start_from, price_end_to, num_of_reviews, num_of_viewed, bookmark_count, "
-    "url, source"
+    "url, source, detail_url"
 )
 
 
@@ -90,6 +90,7 @@ class PostgresCampReader:
             bookmark_count=row["bookmark_count"] or 0,
             url=row["url"],
             source=row["source"] or "camfit",
+            detail_url=row.get("detail_url"),
             photos=photos,
         )
 
@@ -187,15 +188,16 @@ class PostgresCampWriter:
                                        brief, location_brief, contact,
                                        price_start_from, price_end_to,
                                        num_of_reviews, num_of_viewed, bookmark_count,
-                                       url, source, fetched_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+                                       url, source, detail_url, fetched_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
                     ON CONFLICT (id) DO UPDATE SET
                       name=EXCLUDED.name, sido=EXCLUDED.sido, sigungu=EXCLUDED.sigungu,
                       address=EXCLUDED.address, brief=EXCLUDED.brief,
                       location_brief=EXCLUDED.location_brief, contact=EXCLUDED.contact,
                       price_start_from=EXCLUDED.price_start_from, price_end_to=EXCLUDED.price_end_to,
                       num_of_reviews=EXCLUDED.num_of_reviews, num_of_viewed=EXCLUDED.num_of_viewed,
-                      bookmark_count=EXCLUDED.bookmark_count, url=EXCLUDED.url
+                      bookmark_count=EXCLUDED.bookmark_count, url=EXCLUDED.url,
+                      source=EXCLUDED.source, detail_url=EXCLUDED.detail_url
                     """,
                     (
                         camp.id, camp.name, camp.region.sido, camp.region.sigungu,
@@ -205,7 +207,7 @@ class PostgresCampWriter:
                         camp.brief, camp.location_brief, camp.contact,
                         camp.price_start_from, camp.price_end_to,
                         camp.num_of_reviews, camp.num_of_viewed, camp.bookmark_count,
-                        camp.url, camp.source,
+                        camp.url, camp.source, camp.detail_url,
                     ),
                 )
                 if camp.description is not None:

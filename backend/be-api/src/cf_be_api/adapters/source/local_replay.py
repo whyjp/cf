@@ -89,14 +89,17 @@ class LocalReplaySource:
         return iter([])
 
     def _summary(self, raw: dict) -> Camp:
+        cid = raw["id"]
         return Camp(
-            id=raw["id"],
+            id=cid,
             name=raw.get("name") or "(이름 미상)",
             region=Region(
                 sido=raw.get("city") or "(미지정)",
                 sigungu=raw.get("major") or "(미지정)",
             ),
-            url=raw.get("url") or f"https://camfit.co.kr/camp/{raw['id']}",
+            url=raw.get("url") or f"https://camfit.co.kr/camp/{cid}",
+            source="camfit",
+            detail_url=f"https://camfit.co.kr/place/{cid}",
             types=[t.strip() for t in (raw.get("type") or "").split(",") if t.strip()],
             collections=raw.get("_collections") or [],
         )
@@ -112,8 +115,9 @@ class LocalReplaySource:
                 width=m.get("width"),
                 height=m.get("height"),
             ))
+        cid = raw["id"]
         return Camp(
-            id=raw["id"],
+            id=cid,
             name=raw.get("name") or fallback.get("name") or "(이름 미상)",
             region=Region(
                 sido=raw.get("city") or "(미지정)",
@@ -129,7 +133,9 @@ class LocalReplaySource:
             num_of_reviews=int(raw.get("numOfReviews") or 0),
             num_of_viewed=int(raw.get("numOfViewed") or 0),
             bookmark_count=int(raw.get("bookmarkCount") or 0),
-            url=f"https://camfit.co.kr/camp/{raw['id']}",
+            url=f"https://camfit.co.kr/camp/{cid}",
+            source="camfit",
+            detail_url=f"https://camfit.co.kr/place/{cid}",
             types=list(raw.get("types") or []),
             facilities=list(raw.get("facilities") or []),
             additional_facilities=list(raw.get("additionalFacilities") or []),
