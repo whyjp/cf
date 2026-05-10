@@ -5,12 +5,12 @@
 
 cd "$REPO_ROOT"
 fail=0
-for pkg in txcp-crawl camfit-crawl cf-backend cf-pipeline; do
+for pkg in txcp-crawl camfit-crawl cf-be-api cf-pipeline; do
     log_info "=== $pkg ==="
     case "$pkg" in
         txcp-crawl)    path=crawl/txcp ;;
         camfit-crawl)  path=crawl/camfit ;;
-        cf-backend)    path=backend ;;
+        cf-be-api)     path=backend/be-api ;;
         cf-pipeline)   path=pipeline ;;
     esac
     if ! "$UV" run --package "$pkg" pytest "$path" -m "not live and not integration" --tb=short 2>&1 | tail -5; then

@@ -5,7 +5,7 @@ requires-python = ">=3.11"
 [manifest]
 members = [
     "camfit-crawl",
-    "cf-backend",
+    "cf-be-api",
     "cf-pipeline",
     "cf-workspace",
     "txcp-crawl",
@@ -117,9 +117,9 @@ wheels = [
 ]
 
 [[package]]
-name = "cf-backend"
+name = "cf-be-api"
 version = "0.1.0"
-source = { editable = "backend" }
+source = { editable = "backend/be-api" }
 dependencies = [
     { name = "alembic" },
     { name = "falkordb" },
@@ -183,7 +183,7 @@ name = "cf-pipeline"
 version = "0.1.0"
 source = { editable = "pipeline" }
 dependencies = [
-    { name = "cf-backend" },
+    { name = "cf-be-api" },
     { name = "loguru" },
     { name = "pydantic" },
     { name = "rich" },
@@ -198,7 +198,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cf-backend", editable = "backend" },
+    { name = "cf-be-api", editable = "backend/be-api" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },

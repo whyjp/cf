@@ -11,8 +11,8 @@ concepts.
 from __future__ import annotations
 import sys
 
-from cf_backend.settings import Settings
-from cf_backend.container import Container
+from cf_be_api.settings import Settings
+from cf_be_api.container import Container
 from rich.console import Console
 
 

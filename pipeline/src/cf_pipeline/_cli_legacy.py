@@ -66,7 +66,7 @@ def serve(
 ) -> None:
     """FE static + read API 서비스."""
     import uvicorn
-    uvicorn.run("cf_backend.api:app", host=host, port=port, reload=reload)
+    uvicorn.run("cf_be_api.api:app", host=host, port=port, reload=reload)
 
 
 @app.command()

@@ -13,9 +13,9 @@ if [ -f "$BACKEND_PID_FILE" ]; then
     rm -f "$BACKEND_PID_FILE"
 fi
 
-log_info "starting uvicorn cf_backend.api:app on $BACKEND_HOST:$BACKEND_PORT"
+log_info "starting uvicorn cf_be_api.api:app on $BACKEND_HOST:$BACKEND_PORT"
 cd "$REPO_ROOT"
-nohup "$UV" run --package cf-backend uvicorn cf_backend.api:app \
+nohup "$UV" run --package cf-be-api uvicorn cf_be_api.api:app \
     --host "$BACKEND_HOST" --port "$BACKEND_PORT" \
     > "$BACKEND_LOG_FILE" 2>&1 &
 write_pid "$BACKEND_PID_FILE" "$!"
