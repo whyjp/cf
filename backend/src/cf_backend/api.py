@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -988,5 +988,14 @@ def graph_search(
 # ───────────────────────── FE static mount ─────────────────────
 
 fe_path = _settings.fe_dir
+
+
+# SP-B B1 임시: 새 fe/index.html 은 Vite placeholder. B1~B3 동안에는 사용자
+# 트래픽을 legacy (CDN+Babel) 로 보낸다. B4 mount 전환에서 정리(삭제) 예정.
+@app.get("/", include_in_schema=False)
+def temp_root() -> FileResponse:
+    return FileResponse(fe_path / "index.legacy.html")
+
+
 if fe_path.is_dir():
     app.mount("/", StaticFiles(directory=str(fe_path), html=True), name="fe")
