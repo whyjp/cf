@@ -104,23 +104,27 @@ func main() {
 	// non-fatal — /sites and friends keep working; only the graph endpoints
 	// degrade. The admin endpoints additionally need the rebuild-graph
 	// use-case (read repos + graph writer) and the reembed use-case (which
-	// is wired only when the embedder + a vector upserter exist).
+	// is wired only when the embedder + a vector upserter exist — finalised
+	// in D-7 below after the embedder block runs).
+	var rebuildGraphUC api.RebuildGraphUseCase
 	graphRepo, err := falkor.NewGraphRepo(cfg.FalkorDBURL, "camfit")
 	if err != nil {
 		slog.Warn("falkor unavailable — /graph/* and /admin/rebuild-graph will return warnings", "err", err)
 	} else {
-		rebuildGraphUC := usecases.NewRebuildGraph(campRepo, conceptRepo, themeRepo, graphRepo)
-		// reembed needs an Embedder + a VectorUpserter. The embedder is wired
-		// further down (lazy ONNX); for D-6 we surface the endpoint with a
-		// nil reembed so callers see 503 — D-7 will land the upserter.
-		handlers.Admin = api.NewAdminHandler(rebuildGraphUC, nil)
-		handlers.Graph = api.NewGraphHandler(graphRepo)
+		rebuildGraphUC = usecases.NewRebuildGraph(campRepo, conceptRepo, themeRepo, graphRepo)
+		// D-7: pass etaProvider so /graph/{sample,expand} can post-prune Camp
+		// nodes by ETA. May still be nil-safe — main wires etaProvider above.
+		handlers.Graph = api.NewGraphHandler(graphRepo, etaProvider)
 	}
 
 	// D-3: optional semantic search wiring. ONNX assets are large (~423 MB)
 	// and not always present in dev/CI; if any of the three paths is empty
 	// we skip /sites/search and /sites/{id}/similar wiring so the rest of
 	// the API stays usable. Failure to load with all three set is fatal.
+	//
+	// D-7: also feeds /admin/reembed — the same Embedder + a VectorUpserter
+	// (pgvector.Index) are wired into usecases.Reembed below.
+	var reembedUC api.ReembedUseCase
 	if cfg.OnnxLibPath != "" && cfg.OnnxModelPath != "" && cfg.OnnxTokenizerPath != "" {
 		embedder, err := embed.NewOnnxEmbedder(
 			cfg.OnnxLibPath, cfg.OnnxModelPath, cfg.OnnxTokenizerPath,
@@ -134,11 +138,22 @@ func main() {
 		vectorIdx := pgvector.NewIndex(pool)
 		semantic := usecases.NewSemanticSearch(embedder, vectorIdx, campRepo)
 		handlers.Search = api.NewSearchHandler(semantic)
-		slog.Info("semantic search enabled",
+		// D-7: reembed wiring. pgvector.Index satisfies
+		// usecases.VectorUpserter (via ports.VectorUpserter) — the same
+		// struct is used for read (semantic_search) and write (reembed),
+		// matching the Python `PgvectorIndex` layout.
+		reembedUC = usecases.NewReembed(campRepo, reviewRepo, embedder, vectorIdx)
+		slog.Info("semantic search + reembed enabled",
 			"model", cfg.OnnxModelPath,
 			"tokenizer", cfg.OnnxTokenizerPath)
 	} else {
-		slog.Info("semantic search disabled (ONNX env vars unset)")
+		slog.Info("semantic search + reembed disabled (ONNX env vars unset)")
+	}
+
+	// D-7: wire admin handler now that both rebuild and reembed are resolved
+	// (either may be nil — the handler returns 503 for the missing slot).
+	if rebuildGraphUC != nil || reembedUC != nil {
+		handlers.Admin = api.NewAdminHandler(rebuildGraphUC, reembedUC)
 	}
 
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
