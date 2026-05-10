@@ -4,6 +4,7 @@
 //
 //   - SearchByEmbedding ↔ knn (no filter_ids subset)
 //   - GetEmbedding      ↔ get
+//   - UpsertMany        ↔ upsert_many  (D-7: write-side for /admin/reembed)
 //
 // Schema (Python-side):
 //
@@ -33,16 +34,38 @@ import (
 	"github.com/whyjp/cf/be-api-go/internal/ports"
 )
 
+// Default model name written into camp_embeddings.model_name. Matches the
+// Python default (`PgvectorIndex(__init__).model_name="ko-sroberta"`).
+const defaultModelName = "ko-sroberta"
+
 // Index implements ports.VectorIndex.
 type Index struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	modelName string
 }
 
 // Compile-time assertion: Index implements ports.VectorIndex.
 var _ ports.VectorIndex = (*Index)(nil)
 
-// NewIndex builds an Index over an existing pgxpool.
-func NewIndex(pool *pgxpool.Pool) *Index { return &Index{pool: pool} }
+// Compile-time assertion: Index implements ports.VectorUpserter (write-side
+// counterpart consumed by Reembed). Both port interfaces are satisfied by
+// the same struct — same as the Python adapter where read + write hang off
+// `PgvectorIndex`.
+var _ ports.VectorUpserter = (*Index)(nil)
+
+// NewIndex builds an Index over an existing pgxpool with the default model
+// name ("ko-sroberta"). Use NewIndexWithModel to override.
+func NewIndex(pool *pgxpool.Pool) *Index {
+	return &Index{pool: pool, modelName: defaultModelName}
+}
+
+// NewIndexWithModel builds an Index that records modelName in upserted rows.
+func NewIndexWithModel(pool *pgxpool.Pool, modelName string) *Index {
+	if modelName == "" {
+		modelName = defaultModelName
+	}
+	return &Index{pool: pool, modelName: modelName}
+}
 
 // SearchByEmbedding returns the top-k camp IDs ordered by cosine similarity
 // (smallest cosine distance first). Uses pgvector `<=>` to match Python's
@@ -73,6 +96,49 @@ func (i *Index) SearchByEmbedding(ctx context.Context, emb []float32, k int) ([]
 		return nil, err
 	}
 	return ids, nil
+}
+
+// UpsertMany writes (camp_id, vec, text_hash, model_name) rows in a single
+// pgx batch. 1:1 with Python `PgvectorIndex.upsert_many` —
+//
+//	INSERT INTO camp_embeddings (camp_id, vec, text_hash, model_name)
+//	  VALUES ($1, $2, $3, $4)
+//	  ON CONFLICT (camp_id) DO UPDATE SET
+//	    vec = EXCLUDED.vec,
+//	    text_hash = EXCLUDED.text_hash,
+//	    model_name = EXCLUDED.model_name,
+//	    created_at = now()
+//
+// Returns the count of items processed (matches Python `n` return). Empty
+// input returns (0, nil) without touching the pool. Errors short-circuit the
+// batch and surface unwrapped.
+func (i *Index) UpsertMany(ctx context.Context, items []ports.VectorItem) (int, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+	batch := &pgx.Batch{}
+	for _, it := range items {
+		batch.Queue(
+			`INSERT INTO camp_embeddings (camp_id, vec, text_hash, model_name)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (camp_id) DO UPDATE SET
+			   vec = EXCLUDED.vec,
+			   text_hash = EXCLUDED.text_hash,
+			   model_name = EXCLUDED.model_name,
+			   created_at = now()`,
+			it.CampID, pgv.NewVector(it.Vec), it.TextHash, i.modelName,
+		)
+	}
+	br := i.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	n := 0
+	for range items {
+		if _, err := br.Exec(); err != nil {
+			return n, fmt.Errorf("pgvector upsert: %w", err)
+		}
+		n++
+	}
+	return n, nil
 }
 
 // GetEmbedding returns the stored 768-d vector for an item, or
