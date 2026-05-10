@@ -1,0 +1,53 @@
+{
+  "code": 200,
+  "message": null,
+  "data": {
+    "totalCount": 9217,
+    "campList": [
+      {
+        "campSeq": 16706,
+        "campName": "테스트캠핑장 (시범 서비스)",
+        "addr": "서울특별시 강남구 테헤란로 1",
+        "region": "수도권",
+        "regionCd": "R02",
+        "sido": "서울",
+        "sidoCd": "02",
+        "sigungu": "강남구",
+        "sigunguCd": "0207",
+        "campPicList": [
+          {"campPicSeq": 1, "imgUrl": "https://example.com/a.jpg", "title": "", "extYn": "Y", "sort": 1},
+          {"campPicSeq": 2, "imgUrl": "https://example.com/b.jpg", "title": "", "extYn": "Y", "sort": 0}
+        ],
+        "siteTps": "BB000,BB001",
+        "minBasicPrice": 50000,
+        "minSalePrice": 45000,
+        "brdCnt": 12,
+        "monthlyBrdCnt": 3
+      },
+      {
+        "campSeq": 17644,
+        "campName": "두번째캠핑장",
+        "addr": "충북 괴산군 청천면",
+        "sido": "충북",
+        "sigungu": "괴산군",
+        "sidoCd": "10",
+        "sigunguCd": "1004",
+        "campPicList": [{"campPicSeq": 3, "imgUrl": "https://example.com/c.jpg", "sort": 0}],
+        "siteTps": "BB000",
+        "minBasicPrice": 30000,
+        "brdCnt": 5
+      },
+      {
+        "campSeq": 12345,
+        "campName": "콤마,따옴표\"줄바꿈\n포함",
+        "addr": "강원 평창군",
+        "sido": "강원",
+        "sigungu": "평창군",
+        "sidoCd": "06",
+        "sigunguCd": "0601",
+        "campPicList": [],
+        "siteTps": "BB002"
+      }
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tkcp-crawl"
+version = "0.1.0"
+description = "Polite m.thankqcamping.com camping list crawler. Sibling of camfit-puller. Pre-merge into crawlers/ root."
+requires-python = ">=3.11"
+authors = [{ name = "cxx_2" }]
+license = { text = "MIT" }
+readme = "README.md"
+
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "typer>=0.12",
+    "loguru>=0.7",
+    "tenacity>=8.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+]
+playwright = ["playwright>=1.44"]
+
+[project.scripts]
+tkcp-crawl = "tkcp_crawl.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tkcp_crawl"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "live: requires live network (set TKCP_LIVE=1 to enable)",
+]
