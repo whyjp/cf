@@ -9,7 +9,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         desktop: resolve(__dirname, "index.html"),
-        // mobile: resolve(__dirname, "m.html"),  // C1 에서 활성화
+        mobile: resolve(__dirname, "m.html"),
       },
     },
   },
