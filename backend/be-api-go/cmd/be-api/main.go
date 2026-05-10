@@ -20,6 +20,7 @@ import (
 
 	"github.com/whyjp/cf/be-api-go/internal/adapters/embed"
 	"github.com/whyjp/cf/be-api-go/internal/adapters/eta"
+	"github.com/whyjp/cf/be-api-go/internal/adapters/falkor"
 	"github.com/whyjp/cf/be-api-go/internal/adapters/pgvector"
 	"github.com/whyjp/cf/be-api-go/internal/adapters/postgres"
 	"github.com/whyjp/cf/be-api-go/internal/api"
@@ -97,6 +98,23 @@ func main() {
 		Themes:     api.NewThemesHandler(listThemes),
 		Marks:      api.NewMarksHandler(listMarks),
 		Eta:        api.NewEtaHandler(etaProvider, etaForFleet, etaCacheRepo),
+	}
+
+	// D-6: FalkorDB + /graph/* + /admin/*. FalkorDB connect failures are
+	// non-fatal — /sites and friends keep working; only the graph endpoints
+	// degrade. The admin endpoints additionally need the rebuild-graph
+	// use-case (read repos + graph writer) and the reembed use-case (which
+	// is wired only when the embedder + a vector upserter exist).
+	graphRepo, err := falkor.NewGraphRepo(cfg.FalkorDBURL, "camfit")
+	if err != nil {
+		slog.Warn("falkor unavailable — /graph/* and /admin/rebuild-graph will return warnings", "err", err)
+	} else {
+		rebuildGraphUC := usecases.NewRebuildGraph(campRepo, conceptRepo, themeRepo, graphRepo)
+		// reembed needs an Embedder + a VectorUpserter. The embedder is wired
+		// further down (lazy ONNX); for D-6 we surface the endpoint with a
+		// nil reembed so callers see 503 — D-7 will land the upserter.
+		handlers.Admin = api.NewAdminHandler(rebuildGraphUC, nil)
+		handlers.Graph = api.NewGraphHandler(graphRepo)
 	}
 
 	// D-3: optional semantic search wiring. ONNX assets are large (~423 MB)

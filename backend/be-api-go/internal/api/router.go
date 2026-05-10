@@ -17,6 +17,8 @@ type Handlers struct {
 	Themes     *ThemesHandler     // D-4: GET /themes, GET /themes/{theme_id}/camps
 	Marks      *MarksHandler      // D-4: GET /marks, GET /marks/{axis}/camps
 	Eta        *EtaHandler        // D-5: GET /eta, POST /eta/batch, DELETE /eta/cache
+	Admin      *AdminHandler      // D-6: POST /admin/{rebuild-graph,reembed}
+	Graph      *GraphHandler      // D-6: GET /graph/{schema,sample,expand,search}
 }
 
 // NewRouter wires the chi router with baseline middleware, the D-1 healthz
@@ -75,6 +77,16 @@ func NewRouter(h *Handlers) *chi.Mux {
 		r.Get("/eta", h.Eta.One)
 		r.Post("/eta/batch", h.Eta.Batch)
 		r.Delete("/eta/cache", h.Eta.CacheClear)
+	}
+	if h.Admin != nil {
+		r.Post("/admin/rebuild-graph", h.Admin.AdminRebuildGraph)
+		r.Post("/admin/reembed", h.Admin.AdminReembed)
+	}
+	if h.Graph != nil {
+		r.Get("/graph/schema", h.Graph.GraphSchema)
+		r.Get("/graph/sample", h.Graph.GraphSample)
+		r.Get("/graph/expand", h.Graph.GraphExpand)
+		r.Get("/graph/search", h.Graph.GraphSearch)
 	}
 	return r
 }
