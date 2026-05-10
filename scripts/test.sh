@@ -10,10 +10,13 @@ cd "$REPO_ROOT"
 fail=0
 
 # ── Go ─────────────────────────────────────────────────────────────────
+# CC=gcc.exe + WSLENV PATH/l → see scripts/dev-up.sh build_be_api comments.
 log_info "=== be-api (Go) ==="
 if ! ( cd "$REPO_ROOT/backend/be-api" && \
-       PATH="/c/msys64/mingw64/bin:$PATH" CGO_ENABLED=1 \
-       go test ./... 2>&1 | tail -20 ); then
+       WSLENV="CGO_ENABLED:CC:CXX:PATH/l:${WSLENV:-}" \
+       PATH="${MINGW64_BIN:-/c/msys64/mingw64/bin}:$PATH" \
+       CGO_ENABLED=1 CC=gcc.exe CXX=g++.exe \
+       "${GO_BIN:-go}" test ./... 2>&1 | tail -20 ); then
     fail=1
 fi
 

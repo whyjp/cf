@@ -7,13 +7,26 @@
 
 build_be_api() {
     log_info "building be-api Go binary"
-    if [ ! -d "/c/msys64/mingw64/bin" ]; then
-        log_warn "MSYS2 mingw64 not found at /c/msys64/mingw64/bin"
+    local mingw="${MINGW64_BIN:-}"
+    if [ -z "$mingw" ] || [ ! -d "$mingw" ]; then
+        log_warn "MSYS2 mingw64 not found (looked at /c/msys64/mingw64/bin and /mnt/c/...)"
         log_warn "install: https://www.msys2.org/ then 'pacman -S mingw-w64-x86_64-gcc'"
     fi
+    # WSL → Windows env-var forwarding requires WSLENV. Without it, the
+    # Windows go.exe sees CGO_ENABLED=0 (its default) and PATH stripped of
+    # the mingw addition. Git Bash on Windows ignores WSLENV (no harm).
+    #
+    # Tricky bits:
+    #   - CC=gcc.exe (not "gcc") — WSL has /usr/bin/gcc (Linux ELF, wrong for
+    #     Windows builds). We tell cgo to use mingw's gcc.exe explicitly.
+    #   - WSLENV "PATH/l" tells WSL to translate the WSL PATH (with /mnt/c/...
+    #     prefixes) into Windows-style paths (C:\...) when handing off to
+    #     go.exe — that way gcc.exe in mingw is discoverable on the Windows
+    #     side.
     if ! (cd "$REPO_ROOT/backend/be-api" && \
-          PATH="/c/msys64/mingw64/bin:$PATH" CGO_ENABLED=1 \
-          go build -o be-api.exe ./cmd/be-api); then
+          WSLENV="CGO_ENABLED:CC:CXX:PATH/l:${WSLENV:-}" \
+          PATH="$mingw:$PATH" CGO_ENABLED=1 CC=gcc.exe CXX=g++.exe \
+          "${GO_BIN:-go}" build -o be-api.exe ./cmd/be-api); then
         log_error "be-api Go build failed"
         return 1
     fi
@@ -21,8 +34,8 @@ build_be_api() {
     # Bundle mingw64 runtime DLLs (cgo + onnxruntime tags need them at runtime).
     for dll in libgcc_s_seh-1.dll libwinpthread-1.dll libstdc++-6.dll; do
         if [ ! -f "$REPO_ROOT/backend/be-api/$dll" ]; then
-            if [ -f "/c/msys64/mingw64/bin/$dll" ]; then
-                cp "/c/msys64/mingw64/bin/$dll" "$REPO_ROOT/backend/be-api/"
+            if [ -n "$mingw" ] && [ -f "$mingw/$dll" ]; then
+                cp "$mingw/$dll" "$REPO_ROOT/backend/be-api/"
                 log_info "bundled mingw runtime: $dll"
             else
                 log_warn "missing mingw DLL: $dll (be-api may fail to start)"
@@ -52,6 +65,15 @@ start_be_api() {
 
     log_info "starting be-api (Go) on $BE_API_HOST:$BE_API_PORT"
     cd "$REPO_ROOT/backend/be-api"
+    # WSLENV — every var the Windows be-api.exe needs to see. Without this
+    # forwarding list, WSL strips them on the bash → Windows-process boundary
+    # (config defaults take over, e.g. embedder=nil + port=default).
+    #
+    # WSLENV flags:
+    #   /p — translate single Linux path → Windows path (D:\...)
+    #   /l — translate list of paths (PATH-like)
+    # ONNX path vars must be /p so the Windows process gets D:\...\onnxruntime.dll
+    # (not /mnt/d/... which is meaningless on the Windows side).
     DATABASE_URL="$DATABASE_URL" \
     FALKORDB_URL="$FALKORDB_URL" \
     NAVER_NCP_CLIENT_ID="${NAVER_NCP_CLIENT_ID:-}" \
@@ -62,6 +84,7 @@ start_be_api() {
     KO_SROBERTA_TOKENIZER="$REPO_ROOT/backend/be-api/assets-onnx/tokenizer.json" \
     BE_API_HOST="$BE_API_HOST" \
     BE_API_PORT="$BE_API_PORT" \
+    WSLENV="DATABASE_URL:FALKORDB_URL:NAVER_NCP_CLIENT_ID:NAVER_NCP_CLIENT_SECRET:KAKAO_REST_KEY:ONNXRUNTIME_LIB/p:KO_SROBERTA_ONNX/p:KO_SROBERTA_TOKENIZER/p:BE_API_HOST:BE_API_PORT:${WSLENV:-}" \
     nohup ./be-api.exe > "$BE_API_LOG_FILE" 2>&1 &
     write_pid "$BE_API_PID_FILE" "$!"
     log_info "be-api pid $! -- log: $BE_API_LOG_FILE"
