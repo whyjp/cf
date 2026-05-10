@@ -142,7 +142,7 @@ def sites(
     min_score: Optional[float] = None,
     max_score: Optional[float] = None,
     bbox: Optional[str] = Query(None, description="lon1,lat1,lon2,lat2"),
-    limit: int = 2000,
+    limit: int = 10000,
 ) -> list[dict]:
     """Filtered camp list. SP-A A3: returns raw Camp dicts; projection in BFF."""
     bb: Optional[tuple[float, float, float, float]] = None

@@ -104,7 +104,7 @@ def sites(
     min_score: Optional[float] = None,
     max_score: Optional[float] = None,
     bbox: Optional[str] = None,
-    limit: int = 2000,
+    limit: int = 10000,
 ) -> list[dict]:
     raw = _passthrough_get(
         "/sites",
