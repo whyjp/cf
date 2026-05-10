@@ -8,8 +8,8 @@ assets-onnx/
 internal/adapters/embed/assets/
 
 # go binaries
-be-api
-be-api.exe
+/be-api
+/be-api.exe
 
 # test cache fragments
 *.test
