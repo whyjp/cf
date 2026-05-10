@@ -112,7 +112,7 @@ export function visibleRows(
   // Featured axes — registry-driven boolean ANDs.
   for (const a of featuredAxes) {
     const key = `has_${a.id}` as const;
-    if ((filters as Record<string, unknown>)[key]) {
+    if ((filters as unknown as Record<string, unknown>)[key]) {
       out = out.filter((r) => Boolean(r[key]));
     }
   }
