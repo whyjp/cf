@@ -24,3 +24,20 @@ etago/coverage.txt
 
 # OMC harness session-local state (transient)
 .omc/
+
+# uv workspace (single venv at root)
+.venv/
+__pycache__/
+*.pyc
+
+# pytest
+.pytest_cache/
+.coverage
+
+# runtime (pid + log)
+.run/
+*.pid
+*.log
+
+# crawler data dirs (also covered by per-package .gitignore)
+crawl/*/data/

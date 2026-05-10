@@ -1,0 +1,13 @@
+[project]
+name = "cf-workspace"
+version = "0.0.0"
+description = "cf monorepo — crawl/{camfit,txcp} + backend + pipeline (uv workspace root, not published)"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+# Members get added as each sprint moves a package into place.
+# Sprint 1: empty (no members yet — tkcp-crawl is at root, not yet moved).
+members = []
+
+# [tool.uv.sources]
+# cf-backend = { workspace = true }   # uncomment when backend/ exists (Sprint 5)
