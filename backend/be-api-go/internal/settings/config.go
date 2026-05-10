@@ -13,6 +13,13 @@ type Config struct {
 	DatabaseURL string `envconfig:"DATABASE_URL" default:"postgresql://camfit:camfit@localhost:5432/camfit"`
 	FalkorDBURL string `envconfig:"FALKORDB_URL" default:"redis://localhost:6379"`
 	LogLevel    string `envconfig:"LOG_LEVEL" default:"info"`
+
+	// D-3: ONNX semantic search assets. Empty paths disable the
+	// /sites/search and /sites/{id}/similar endpoints — useful for the
+	// D-1/D-2 integration tests which only need /healthz and /sites.
+	OnnxLibPath       string `envconfig:"ONNXRUNTIME_LIB" default:""`
+	OnnxModelPath     string `envconfig:"KO_SROBERTA_ONNX" default:""`
+	OnnxTokenizerPath string `envconfig:"KO_SROBERTA_TOKENIZER" default:""`
 }
 
 // Load reads configuration from process environment variables.

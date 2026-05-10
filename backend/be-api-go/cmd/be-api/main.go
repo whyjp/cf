@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/whyjp/cf/be-api-go/internal/adapters/embed"
+	"github.com/whyjp/cf/be-api-go/internal/adapters/pgvector"
 	"github.com/whyjp/cf/be-api-go/internal/adapters/postgres"
 	"github.com/whyjp/cf/be-api-go/internal/api"
 	"github.com/whyjp/cf/be-api-go/internal/settings"
@@ -46,6 +48,30 @@ func main() {
 	listCamps := usecases.NewListCamps(campRepo)
 	handlers := &api.Handlers{
 		Sites: api.NewSitesHandler(listCamps),
+	}
+
+	// D-3: optional semantic search wiring. ONNX assets are large (~423 MB)
+	// and not always present in dev/CI; if any of the three paths is empty
+	// we skip /sites/search and /sites/{id}/similar wiring so the rest of
+	// the API stays usable. Failure to load with all three set is fatal.
+	if cfg.OnnxLibPath != "" && cfg.OnnxModelPath != "" && cfg.OnnxTokenizerPath != "" {
+		embedder, err := embed.NewOnnxEmbedder(
+			cfg.OnnxLibPath, cfg.OnnxModelPath, cfg.OnnxTokenizerPath,
+		)
+		if err != nil {
+			slog.Error("embed init", "err", err)
+			os.Exit(1)
+		}
+		defer embedder.Close()
+
+		vectorIdx := pgvector.NewIndex(pool)
+		semantic := usecases.NewSemanticSearch(embedder, vectorIdx, campRepo)
+		handlers.Search = api.NewSearchHandler(semantic)
+		slog.Info("semantic search enabled",
+			"model", cfg.OnnxModelPath,
+			"tokenizer", cfg.OnnxTokenizerPath)
+	} else {
+		slog.Info("semantic search disabled (ONNX env vars unset)")
 	}
 
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
