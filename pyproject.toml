@@ -5,8 +5,11 @@ description = "cf monorepo — crawl/{camfit,txcp} + backend + pipeline (uv work
 requires-python = ">=3.11"
 
 [tool.uv.workspace]
-members = ["crawl/txcp", "crawl/camfit", "backend/be-api", "backend/be-for-fe", "pipeline"]
+# SP-D D-8 cutover (2026-05-11): backend/be-api/ is now the Go binary (no
+# Python pkg there). Python core moved to backend/be-api-py/ (cf-be-api-py)
+# — library-only, consumed by cf-pipeline CLI tooling.
+members = ["crawl/txcp", "crawl/camfit", "backend/be-api-py", "backend/be-for-fe", "pipeline"]
 
 [tool.uv.sources]
-cf-be-api = { workspace = true }
+cf-be-api-py = { workspace = true }
 cf-be-for-fe = { workspace = true }

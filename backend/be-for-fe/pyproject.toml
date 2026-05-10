@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cf-be-for-fe"
 version = "0.1.0"
-description = "cf BFF — projection + aggregation over cf-be-api. Externally exposed."
+description = "cf BFF — projection + aggregation over be-api (Go). Externally exposed."
 requires-python = ">=3.11"
 authors = [{ name = "cxx_2" }]
 license = { text = "MIT" }

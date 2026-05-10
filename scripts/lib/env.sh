@@ -45,3 +45,18 @@ else
     echo "[env.sh] ERROR: uv not found in PATH" >&2
     exit 1
 fi
+
+# SP-D D-8 cutover (2026-05-11): be-api is the Go binary at backend/be-api/.
+# DLLs (mingw runtime + onnxruntime) live next to the .exe; assets-onnx/ holds
+# ko-sroberta + tokenizer.
+export BE_API_BIN="$REPO_ROOT/backend/be-api/be-api.exe"
+
+# Make `go` discoverable in WSL bash even when only the Windows install exists.
+if ! command -v go >/dev/null 2>&1; then
+    for _go in /c/Program\ Files/Go/bin /mnt/c/Program\ Files/Go/bin; do
+        if [ -x "$_go/go.exe" ] || [ -x "$_go/go" ]; then
+            export PATH="$_go:$PATH"
+            break
+        fi
+    done
+fi

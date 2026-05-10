@@ -12,7 +12,10 @@ license = { text = "MIT" }
 readme = "README.md"
 
 dependencies = [
-    "cf-be-api",
+    # SP-D D-8 cutover: cf-be-api → cf-be-api-py (HTTP layer dropped, Python
+    # import path `cf_be_api` unchanged). pipeline still uses the Container,
+    # Settings, domain models, and use-case classes for one-shot ETL.
+    "cf-be-api-py",
     "typer>=0.12",
     "loguru>=0.7",
     "pydantic>=2.7",
