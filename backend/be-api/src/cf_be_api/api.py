@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from .settings import Settings
 from .container import Container
+from .domain.camping_filter import is_camping_facility
 from .domain.errors import CampNotFound
 from .domain.featured_axes import FEATURED_AXES
 
@@ -102,7 +103,8 @@ def site_search(q: str = Query(..., min_length=1), k: int = 20) -> list[dict]:
     if not q.strip():
         return []
     camps = _container.semantic_search().execute(q.strip(), k=max(1, min(k, 100)))
-    return [c.model_dump() for c in camps]
+    # P6: drop non-camping facilities. See /sites for the rule.
+    return [c.model_dump() for c in camps if is_camping_facility(c)]
 
 
 @app.get("/sites/{site_id}/similar")
@@ -117,7 +119,12 @@ def site_similar(site_id: str, k: int = 10) -> list[dict]:
     hits = _container.vector.knn(vec, k=k + 1)  # +1 to exclude self
     other_ids = [cid for cid, _ in hits if cid != site_id][:k]
     by_id = {c.id: c for c in _container.camps_read.list_filtered(ids=other_ids)}
-    return [by_id[cid].model_dump() for cid in other_ids if cid in by_id]
+    # P6: drop non-camping facilities. See /sites for the rule.
+    return [
+        by_id[cid].model_dump()
+        for cid in other_ids
+        if cid in by_id and is_camping_facility(by_id[cid])
+    ]
 
 
 @app.get("/sites/{site_id}")
@@ -160,7 +167,9 @@ def sites(
         min_score=min_score, max_score=max_score,
         bbox=bb, limit=limit,
     )
-    return [c.model_dump() for c in rows]
+    # P6: drop pure pension / unknown-only records — only camping facilities
+    # surface to the FE. Predicate is source-agnostic (camfit + txcp).
+    return [c.model_dump() for c in rows if is_camping_facility(c)]
 
 
 # ───────────────────────── Featured axes ─────────────────────
