@@ -25,12 +25,12 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testMatch: /desktop\.spec\.ts$/,
+      testMatch: /desktop(?:[-.].+)?\.spec\.ts$/,
     },
     {
       name: "mobile",
       use: { ...devices["iPhone 12"] },
-      testMatch: /mobile\.spec\.ts$/,
+      testMatch: /mobile(?:[-.].+)?\.spec\.ts$/,
     },
   ],
   webServer: {
