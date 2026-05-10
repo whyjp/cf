@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ETA_HARD_CAP } from "../shared/constants";
 import type { Filters } from "../shared/filters";
 import { haversineKm } from "../shared/geo";
-import { useDetail as _useDetailUnused } from "../shared/hooks/useDetail";
 import { useEtaBatch } from "../shared/hooks/useEtaBatch";
 import { useFacets } from "../shared/hooks/useFacets";
 import { useFeaturedAxes } from "../shared/hooks/useFeaturedAxes";
@@ -20,17 +19,9 @@ import { MapView } from "./components/MapView";
 import { MobileToggle } from "./components/MobileToggle";
 import { SearchBox } from "./components/SearchBox";
 
-// `useDetail` is consumed inside DetailPanel; the import above is just to
-// keep the original mental model of "App pulls all the data hooks" — but
-// TS dislikes unused imports under noUnusedLocals. Touch the binding.
-void _useDetailUnused;
-
 /**
- * Root desktop App — state container + layout shell.
- *
- * Origin: fe/index.legacy.html:1426-1784. Behaviour, JSX shape,
- * className strings, event handlers all preserved verbatim. Only the
- * imports shifted to the shared/components packages.
+ * Root desktop App — state container + layout shell. `useDetail` is owned
+ * by `DetailPanel`; App only wires the rest of the data hooks here.
  */
 export function App() {
   const [view, setView] = useState<"split" | "map" | "list">("split");
