@@ -4,5 +4,5 @@
 . "$(dirname "$0")/lib/common.sh"
 
 cd "$REPO_ROOT"
-log_info "txcp-crawl pull (args: $*)"
+log_info "txcp-crawl pull (data_dir=$TXCP_DATA, args: $*)"
 exec "$UV" run --package txcp-crawl python -m txcp_crawl.cli pull "$@"

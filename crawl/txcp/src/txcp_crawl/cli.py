@@ -10,6 +10,7 @@ import typer
 from loguru import logger
 
 from txcp_crawl import crawler as crawler_mod
+from txcp_crawl import detail as detail_mod
 from txcp_crawl.adapter import TkcpAdapter
 from txcp_crawl.csv_writer import write_camps_csv
 from txcp_crawl.fetcher import HttpxFetcher
@@ -105,6 +106,74 @@ def inspect_page(
         typer.echo(json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
     asyncio.run(_run())
+
+
+@app.command("detail")
+def detail_cmd(
+    cseq: list[str] = typer.Option(None, "--cseq", help="명시적 campSeq (반복 가능)."),
+    cseqs_file: Path = typer.Option(None, "--cseqs-file", help="줄단위 campSeq 목록 파일 (txcp: prefix 자동 strip)."),
+    limit: int = typer.Option(None, help="cseqs 의 첫 N 만 처리 (smoke 용)."),
+    skip_existing: bool = typer.Option(True, help="data/details/{cseq}.json 이미 있으면 건너뜀."),
+) -> None:
+    """Per-camp detail page (view.hbb?cseq=X) crawl — raw HTML + minimal parse 적재.
+
+    cseq 입력 우선순위: --cseq > --cseqs-file > data/camps.jsonl 전체.
+
+    데이터:
+      data/details_html/{cseq}.html  ← raw HTML byte-perfect (loss-free)
+      data/details/{cseq}.json       ← minimal parse (title/photos/label_value_pairs)
+
+    Examples:
+        txcp-crawl detail --cseq 14870 --cseq 16706                  # 2개만
+        txcp-crawl detail --cseqs-file data/_camping_ids.txt          # 캠핑장만
+        txcp-crawl detail --limit 10                                  # camps.jsonl 첫 10
+        txcp-crawl detail                                              # 전체 (~9,200, ~6.5h)
+    """
+    settings = Settings()
+    _setup_logger(settings.log_level)
+
+    if cseq:
+        cseqs = list(cseq)
+    elif cseqs_file:
+        if not cseqs_file.exists():
+            typer.echo(f"cseqs file not found: {cseqs_file}", err=True)
+            raise typer.Exit(code=1)
+        cseqs = []
+        for line in cseqs_file.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            # strip "txcp:" namespace prefix if present
+            if s.startswith("txcp:"):
+                s = s[5:]
+            cseqs.append(s)
+        if not cseqs:
+            typer.echo(f"no cseqs in file: {cseqs_file}", err=True)
+            raise typer.Exit(code=1)
+    else:
+        jsonl = settings.data_dir / "camps.jsonl"
+        cseqs = detail_mod.cseqs_from_camps_jsonl(jsonl)
+        if not cseqs:
+            typer.echo(f"no cseqs found (no --cseq and {jsonl} empty)", err=True)
+            raise typer.Exit(code=1)
+
+    if limit is not None:
+        cseqs = cseqs[:limit]
+
+    try:
+        summary = asyncio.run(
+            detail_mod.fetch_many(
+                cseqs,
+                base_url=settings.base_url,
+                data_dir=settings.data_dir,
+                skip_existing=skip_existing,
+                timeout_s=settings.request_timeout_s,
+            )
+        )
+    except KeyboardInterrupt:
+        logger.warning("KeyboardInterrupt -- partial data persisted.")
+        raise typer.Exit(code=130)
+    typer.echo(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

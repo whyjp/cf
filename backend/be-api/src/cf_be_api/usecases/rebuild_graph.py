@@ -38,18 +38,41 @@ class RebuildGraph:
     theme_repo: ThemeRepository
     graph: GraphStore
 
-    def execute(self) -> dict:
-        self.graph.reset()
+    def execute(
+        self,
+        *,
+        since_iso: str | None = None,
+        ids: list[str] | None = None,
+    ) -> dict:
+        """Rebuild graph from PG.
+
+        Modes:
+          full (default): graph.reset() + iter_all + MERGE/SET for every camp.
+          incremental (since_iso or ids given): NO reset, only camps matching the
+            filter get MERGE/SET. Concepts/Themes/edges still re-derived (they
+            depend on signals which may have changed for the touched camps).
+        """
+        incremental = bool(since_iso or ids)
+        if not incremental:
+            self.graph.reset()
+
         n_camps = 0
-        for camp in self.camp_reader.iter_all():
+        camp_iter = (
+            self.camp_reader.iter_since(since_iso=since_iso, ids=ids)
+            if incremental
+            else self.camp_reader.iter_all()
+        )
+        for camp in camp_iter:
             params = {
                 "id": camp.id,
                 "name": camp.name,
                 "lat": camp.geo.lat if camp.geo else None,
                 "lon": camp.geo.lon if camp.geo else None,
                 "url": camp.url,
+                "detail_url": camp.detail_url,
                 "addr": camp.address,
                 "desc": camp.description,
+                "source": camp.source,
                 "sido": camp.region.sido,
                 "sigungu": camp.region.sigungu,
                 "types": camp.types,
@@ -62,7 +85,8 @@ class RebuildGraph:
                 """
                 MERGE (c:Camp {id:$id})
                 SET c.name=$name, c.lat=$lat, c.lon=$lon, c.url=$url,
-                    c.address=$addr, c.description=$desc
+                    c.detail_url=$detail_url,
+                    c.address=$addr, c.description=$desc, c.source=$source
                 MERGE (r:Region {sido:$sido, sigungu:$sigungu})
                 MERGE (c)-[:LOCATED_IN]->(r)
                 FOREACH (t IN $types | MERGE (cat:Category {name:t}) MERGE (c)-[:HAS_CATEGORY]->(cat))

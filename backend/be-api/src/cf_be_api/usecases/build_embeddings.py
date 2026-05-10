@@ -25,16 +25,27 @@ class BuildEmbeddings:
     vector_index: VectorIndex
     batch_size: int = 32
 
-    def execute(self) -> int:
-        ids: list[str] = []
+    def execute(self, *, ids: list[str] | None = None) -> int:
+        """Build/refresh embeddings.
+
+        Default (ids=None): every camp in PG (full rebuild).
+        ids=[...]: only those camps (incremental — pair with ingest_camps --incremental's new_ids).
+        Idempotent: same camp re-encoded if called again.
+        """
+        camp_iter = (
+            self.camp_reader.iter_since(ids=ids)
+            if ids
+            else self.camp_reader.iter_all()
+        )
+        camp_ids: list[str] = []
         texts: list[str] = []
-        for camp in self.camp_reader.iter_all():
+        for camp in camp_iter:
             top = list(self.review_reader.top_for(camp.id, n=5))
             text = build_embed_text(camp, top)
-            ids.append(camp.id)
+            camp_ids.append(camp.id)
             texts.append(text)
-        if not ids:
+        if not camp_ids:
             return 0
         vecs = self.embedder.encode_batch(texts, batch_size=self.batch_size)
-        items = [(cid, vecs[i], text_hash(texts[i])) for i, cid in enumerate(ids)]
+        items = [(cid, vecs[i], text_hash(texts[i])) for i, cid in enumerate(camp_ids)]
         return self.vector_index.upsert_many(items)
