@@ -1,3 +1,94 @@
+@import "../shared/styles/tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * index.legacy.html <style> block (lines ~38-120) — :root excluded
+ * (already in shared/styles/tokens.css). Pin/cluster + chip + leaflet
+ * baseline lifted verbatim so visual identity matches legacy.
+ */
+html, body { height: 100%; }
+body {
+  font-family: "Pretendard Variable", Pretendard, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  background:
+    radial-gradient(1200px 800px at 80% -20%, rgba(44,74,62,0.08), transparent 70%),
+    repeating-linear-gradient(135deg, transparent 0 28px, rgba(44,74,62,0.045) 28px 29px),
+    var(--paper);
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.topo {
+  /* topographic-feeling SVG background */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='560' height='560'><g fill='none' stroke='%232c4a3e' stroke-opacity='0.08' stroke-width='0.8'><path d='M0,300 C100,250 200,360 300,300 S500,250 600,300'/><path d='M-30,330 C100,280 200,390 300,330 S500,280 600,330'/><path d='M-30,360 C100,310 200,420 300,360 S500,310 600,360'/><path d='M-30,260 C100,210 200,320 300,260 S500,210 600,260'/><path d='M-30,200 C100,150 200,260 300,200 S500,150 600,200'/></g></svg>");
+  background-size: 560px 560px;
+}
+.display { font-feature-settings: "ss01","tnum"; letter-spacing: -0.02em; }
+.hairline { border-color: rgba(26,26,23,0.12); }
+.chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 500;
+  background: rgba(44,74,62,0.08); color: var(--moss-deep);
+  border: 1px solid rgba(44,74,62,0.14);
+}
+.chip.warm { background: rgba(200,85,61,0.08); color: var(--ember); border-color: rgba(200,85,61,0.18); }
+.chip.bark { background: rgba(107,79,44,0.08); color: var(--bark); border-color: rgba(107,79,44,0.2); }
+.btn {
+  border: 1px solid rgba(26,26,23,0.18); background: var(--paper); color: var(--ink);
+  padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  transition: all 0.15s ease;
+}
+.btn:hover { background: var(--paper-2); border-color: rgba(26,26,23,0.32); }
+.btn-primary {
+  background: var(--moss); color: #f7f4e8; border-color: var(--moss-deep);
+}
+.btn-primary:hover { background: var(--moss-deep); }
+.toggle-pill {
+  background: rgba(26,26,23,0.06); border-radius: 999px; padding: 2px;
+  display: inline-flex; gap: 2px;
+}
+.toggle-pill button { padding: 5px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; color: rgba(26,26,23,0.5); }
+.toggle-pill button.active { background: var(--moss); color: #f7f4e8; }
+.card {
+  background: var(--paper);
+  border: 1px solid rgba(26,26,23,0.10);
+  border-radius: 14px;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.card:hover { transform: translateY(-1px); border-color: rgba(26,26,23,0.28); box-shadow: 0 12px 28px -18px rgba(26,26,23,0.45); }
+.num { font-variant-numeric: tabular-nums; }
+.kbd {
+  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
+  font-size: 11px; padding: 1px 6px; border-radius: 4px;
+  background: rgba(26,26,23,0.07); border: 1px solid rgba(26,26,23,0.13);
+}
+.leaflet-container {
+  background: #e7e1cf;
+  font-family: inherit;
+}
+.pin-cluster {
+  background: var(--moss); color: #f7f4e8; border-radius: 999px;
+  width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; box-shadow: 0 2px 8px rgba(26,26,23,0.25);
+  border: 2px solid #f4f1e8;
+}
+.pin-cluster.lg { width: 46px; height: 46px; font-size: 14px; }
+.pin-pin {
+  width: 20px; height: 20px; border-radius: 999px;
+  background: var(--moss); border: 2.5px solid #f7f4e8;
+  box-shadow: 0 1.5px 4px rgba(26,26,23,0.32);
+}
+/* One color per featured-axis id. Order matches FEATURED_AXES — when
+   adding a new axis, paste its id here with a hex. Default (.pin-pin
+   alone) stays moss-green for non-featured camps. */
+.pin-pin.valley     { background: #2c6e7b; }
+.pin-pin.kids       { background: #c8553d; }
+.pin-pin.trampoline { background: #6b4f2c; }
+.pin-pin.halloween  { background: #ff7518; }   /* pumpkin */
+.pin-pin.cherry     { background: #ffb7c5; }   /* sakura */
+.pin-pin.autumn     { background: #d35400; }   /* maple */
+/* scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(26,26,23,0.2); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
