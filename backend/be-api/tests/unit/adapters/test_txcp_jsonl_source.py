@@ -153,3 +153,60 @@ def test_missing_jsonl_file(tmp_path):
     d.mkdir()
     src = TxcpJsonlSource(d)
     assert list(src.iter_summaries()) == []
+
+
+def test_get_detail_enriches_when_details_json_present(txcp_data_dir):
+    """details/{cseq}.json present → photos extended + label_value_pairs surfaced."""
+    details_dir = txcp_data_dir / "details"
+    details_dir.mkdir()
+    (details_dir / "16706.json").write_text(json.dumps({
+        "cseq": "16706",
+        "title": "땡큐캠핑 | 노을진캠핑장 | 인천",
+        "photos": [
+            "/file/2025/02/10/p1.jpg",
+            "/file/2025/02/10/p2.jpg",
+            "https://image.thankqcamping.com/file/x.jpg",  # already in summary
+        ],
+        "label_value_pairs": {
+            "예약": "실시간 예약",
+            "주소": "인천 서구 정서진로 500 (오류동) 상세",
+            "전화": "032-000-0000",
+        },
+        "raw_html_path": "details_html/16706.html",
+        "fetched_at": "2026-05-10T00:00:00Z",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    src = TxcpJsonlSource(txcp_data_dir)
+    enriched = src.get_detail("txcp:16706")
+    assert enriched is not None
+    # photos: summary had 1 (https://...x.jpg) + detail adds 2 host-relative absolutized
+    photo_urls = {p.url for p in enriched.photos}
+    assert "https://image.thankqcamping.com/file/2025/02/10/p1.jpg" in photo_urls
+    assert "https://image.thankqcamping.com/file/2025/02/10/p2.jpg" in photo_urls
+    assert "https://image.thankqcamping.com/file/x.jpg" in photo_urls
+    assert len(enriched.photos) == 3
+    # label_value_pairs surfaced
+    assert enriched.contact == "032-000-0000"
+    assert enriched.brief == "실시간 예약"
+    assert enriched.address and "정서진로 500" in enriched.address
+
+
+def test_get_detail_falls_back_when_no_details_json(txcp_data_dir):
+    """details/{cseq}.json absent → summary returned untouched."""
+    src = TxcpJsonlSource(txcp_data_dir)
+    summary_only = src.get_detail("txcp:16706")
+    assert summary_only is not None
+    assert summary_only.contact is None
+    assert summary_only.brief is None
+    # photos = single thumbnail from summary
+    assert len(summary_only.photos) == 1
+
+
+def test_get_detail_robust_to_corrupt_details_json(txcp_data_dir):
+    """Bad JSON in details/{cseq}.json → silent fallback to summary, no crash."""
+    (txcp_data_dir / "details").mkdir()
+    (txcp_data_dir / "details" / "16706.json").write_text("not json at all {", encoding="utf-8")
+    src = TxcpJsonlSource(txcp_data_dir)
+    camp = src.get_detail("txcp:16706")
+    assert camp is not None
+    assert camp.contact is None  # no enrichment happened

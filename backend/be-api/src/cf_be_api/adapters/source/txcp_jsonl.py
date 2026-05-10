@@ -77,15 +77,26 @@ class TxcpJsonlSource:
             yield self._to_camp(raw)
 
     def get_detail(self, camp_id: str) -> Optional[Camp]:
-        # detail-bridge not yet implemented: fall back to summary.
-        # camp_id may arrive with or without "txcp:" prefix.
+        """Return enriched Camp from data/details/{cseq}.json if available, else summary.
+
+        camp_id may arrive with or without "txcp:" prefix. The summary acts as
+        the fallback baseline; any keys present in the detail JSON augment / replace
+        the summary fields:
+          - photos: prepend detail photos (host-relative URLs absolutized)
+          - description / brief: from label_value_pairs if a known label maps
+          - hashtags / facilities: empty until a richer parser ships
+        """
         key = camp_id[5:] if camp_id.startswith("txcp:") else camp_id
         raw = self._records.get(str(key))
-        return self._to_camp(raw) if raw else None
+        if raw is None:
+            return None
+        camp = self._to_camp(raw)
+        return self._enrich_with_detail(camp, str(key))
 
     def iter_reviews(self, camp_id: str, *, sort: str = "recommend") -> Iterator[Review]:
-        # Reviews require detail-bridge crawl (per-camp HTML page parse). Empty
-        # until that sprint lands.
+        # Reviews require richer detail-page parsing (review section). The
+        # current minimal parser does not surface them yet; the raw HTML in
+        # data/details_html/{cseq}.html is preserved for a future parser pass.
         return iter([])
 
     def iter_filters(self) -> Iterator[tuple[str, str, str, dict | None]]:
@@ -94,6 +105,41 @@ class TxcpJsonlSource:
             yield code, label, "site_tp", {"site_tp_code": code}
 
     # ─────────────────────────────────────── private
+
+    def _enrich_with_detail(self, summary: Camp, cseq: str) -> Camp:
+        """If data/details/{cseq}.json exists, merge its fields into summary."""
+        det_path = self._dir / "details" / f"{cseq}.json"
+        if not det_path.exists():
+            return summary
+        try:
+            det = json.loads(det_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return summary
+
+        # Photos: prepend the (typically richer) detail photos. Absolutize host-relative.
+        merged_photos = list(summary.photos)
+        seen_urls = {p.url for p in merged_photos}
+        for src in det.get("photos") or []:
+            url = src if src.startswith("http") else f"https://image.thankqcamping.com{src}"
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            merged_photos.append(Photo(url=url))
+
+        # Label-value pairs to known fields. Empty `pairs` is fine.
+        pairs: dict[str, str] = det.get("label_value_pairs") or {}
+        # Heuristic mapping for the 4 commonly-seen labels (probed): 예약 / 주소 / 전화 / Q-Point.
+        # We surface 주소 if it adds info, contact if not already set, and 예약 description as brief.
+        new_address = pairs.get("주소") or summary.address
+        new_contact = pairs.get("전화") or summary.contact
+        new_brief = pairs.get("예약") or summary.brief
+
+        return summary.model_copy(update={
+            "photos": merged_photos,
+            "address": new_address,
+            "contact": new_contact,
+            "brief": new_brief,
+        })
 
     def _to_camp(self, raw: dict) -> Camp:
         rid = str(raw["id"])
