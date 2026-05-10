@@ -9,6 +9,9 @@ import { DesktopToggle } from "./DesktopToggle";
  * C5: menu (≡) 버튼이 dropdown 토글 → DesktopToggle ("데스크톱으로") 노출.
  *     dropdown outside click + esc 로 닫힘. 추가 메뉴 항목은 후속 sprint
  *     에서 본 dropdown 안에 누적.
+ * C6: paddingTop = env(safe-area-inset-top) — viewport-fit=cover 환경에서
+ *     iOS 노치 / Dynamic Island / 안드로이드 status bar 가 헤더 컨텐츠를
+ *     덮지 않도록. 노치 없는 단말은 0px 로 fallback (env() 미지원 단말 포함).
  */
 interface Props {
   onSearch?: () => void;
@@ -38,7 +41,11 @@ export function TopBar({ onSearch }: Props) {
   return (
     <header
       className="h-14 px-4 flex items-center justify-between border-b flex-shrink-0 relative"
-      style={{ borderColor: "rgba(26,26,23,0.12)", background: "var(--paper)" }}
+      style={{
+        borderColor: "var(--border-faint)",
+        background: "var(--paper)",
+        paddingTop: "env(safe-area-inset-top)",
+      }}
     >
       <div ref={menuRef} className="relative">
         <button

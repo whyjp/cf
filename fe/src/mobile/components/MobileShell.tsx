@@ -94,7 +94,7 @@ export function MobileShell() {
         <BottomSheet initial="peek">
           <div
             className="px-4 py-3 border-b flex items-center gap-2"
-            style={{ borderColor: "rgba(26,26,23,0.12)" }}
+            style={{ borderColor: "var(--border-faint)" }}
           >
             <span className="display font-semibold text-base num">
               {loading ? "…" : visibleRows.length.toLocaleString()}
