@@ -1,4 +1,4 @@
-package route
+package eta
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/whyjp/etago/internal/parse"
+	"github.com/whyjp/cf/be-api-go/internal/adapters/eta/parse"
 )
 
 func mkNaverInput(t *testing.T) parse.NormalizedInput {

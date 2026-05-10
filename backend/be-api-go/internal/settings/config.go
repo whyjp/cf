@@ -1,6 +1,14 @@
 package settings
 
-import "github.com/kelseyhightower/envconfig"
+import (
+	"os"
+
+	"github.com/kelseyhightower/envconfig"
+)
+
+// osLookupEnv is a thin wrapper for os.Getenv to make the legacy fallback
+// in Load() obviously a fallback (not part of the envconfig schema).
+var osLookupEnv = os.Getenv
 
 // Config is the runtime configuration for the be-api Go service.
 //
@@ -20,13 +28,35 @@ type Config struct {
 	OnnxLibPath       string `envconfig:"ONNXRUNTIME_LIB" default:""`
 	OnnxModelPath     string `envconfig:"KO_SROBERTA_ONNX" default:""`
 	OnnxTokenizerPath string `envconfig:"KO_SROBERTA_TOKENIZER" default:""`
+
+	// D-5: ETA absorption (etago). Naver Cloud Platform Maps API keys
+	// (Geocoding + Directions 5) and Kakao K1 / KakaoMobility key.
+	// Both NCP keys empty → /eta falls back to the anonymous Naver search
+	// path (captcha-prone) and Kakao K1 + OSRM. The endpoints stay live
+	// either way; only the *quality* of the ETA changes.
+	//
+	// Aliases: NCP_CLIENT_ID / NCP_CLIENT_SECRET are read as fallbacks so
+	// the same .env that fed the legacy etago CLI keeps working.
+	NaverNCPClientID     string `envconfig:"NAVER_NCP_CLIENT_ID"`
+	NaverNCPClientSecret string `envconfig:"NAVER_NCP_CLIENT_SECRET"`
+	KakaoRESTKey         string `envconfig:"KAKAO_REST_KEY"`
 }
 
 // Load reads configuration from process environment variables.
+//
+// Compatibility: the legacy etago CLI read NCP_CLIENT_ID / NCP_CLIENT_SECRET
+// (no NAVER_ prefix). For users with an existing .env, we honor those names
+// as fallbacks when NAVER_NCP_CLIENT_ID / NAVER_NCP_CLIENT_SECRET are empty.
 func Load() (*Config, error) {
 	var c Config
 	if err := envconfig.Process("", &c); err != nil {
 		return nil, err
+	}
+	if c.NaverNCPClientID == "" {
+		c.NaverNCPClientID = osLookupEnv("NCP_CLIENT_ID")
+	}
+	if c.NaverNCPClientSecret == "" {
+		c.NaverNCPClientSecret = osLookupEnv("NCP_CLIENT_SECRET")
 	}
 	return &c, nil
 }

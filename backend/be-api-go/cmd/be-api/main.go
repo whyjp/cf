@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/whyjp/cf/be-api-go/internal/adapters/embed"
+	"github.com/whyjp/cf/be-api-go/internal/adapters/eta"
 	"github.com/whyjp/cf/be-api-go/internal/adapters/pgvector"
 	"github.com/whyjp/cf/be-api-go/internal/adapters/postgres"
 	"github.com/whyjp/cf/be-api-go/internal/api"
@@ -62,6 +63,32 @@ func main() {
 	listThemes := usecases.NewListThemes(themeRepo, campRepo)
 	listMarks := usecases.NewListMarks(markRepo)
 
+	// D-5: ETA absorption — Naver NCP + Kakao K1 + OSRM in-process.
+	// HTTP client with no built-in timeout; ctx drives cancellation per
+	// provider attempt (PerSourceTimeout caps each individual call).
+	etaHTTP := &http.Client{Timeout: 0}
+	const etaUA = "cf-be-api-go/1.0 (+https://github.com/whyjp/cf)"
+	naverProv := eta.NewNaverProvider(etaHTTP, etaUA, cfg.NaverNCPClientID, cfg.NaverNCPClientSecret)
+	kakaoProv := eta.NewKakaoProvider(etaHTTP, etaUA)
+	// Wire Kakao's K1 search as fallback geocoder when NCP only ships
+	// Directions 5 (no Geocoding service) — same trick the etago CLI used.
+	naverProv.Geocoder = kakaoProv
+	// Chain order: Naver-NCP first when credentials are present (genuine
+	// traffic-aware ETA from Naver Directions 5); otherwise Kakao+OSRM
+	// first because anonymous Naver search is captcha-gated.
+	var chain []eta.Provider
+	if naverProv.HasNcp() {
+		chain = []eta.Provider{naverProv, kakaoProv}
+		slog.Info("eta chain: naver-ncp → kakao+osrm")
+	} else {
+		chain = []eta.Provider{kakaoProv, naverProv}
+		slog.Info("eta chain: kakao+osrm → naver-anonymous (no NCP creds)")
+	}
+	etaProvider := eta.NewRouterProvider(chain)
+	geocoder := eta.NewKakaoGeocoder(kakaoProv)
+	etaForFleet := usecases.NewEtaForFleet(campRepo, etaProvider, geocoder)
+	etaCacheRepo := postgres.NewEtaCacheRepo(pool)
+
 	handlers := &api.Handlers{
 		Sites:      api.NewSitesHandler(listCamps),
 		SiteDetail: api.NewSiteDetailHandler(getSiteDetail),
@@ -69,6 +96,7 @@ func main() {
 		Concepts:   api.NewConceptsHandler(listConcepts),
 		Themes:     api.NewThemesHandler(listThemes),
 		Marks:      api.NewMarksHandler(listMarks),
+		Eta:        api.NewEtaHandler(etaProvider, etaForFleet, etaCacheRepo),
 	}
 
 	// D-3: optional semantic search wiring. ONNX assets are large (~423 MB)
