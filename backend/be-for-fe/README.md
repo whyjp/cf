@@ -24,3 +24,8 @@ BFF_BE_API_BASE_URL=http://localhost:8071 \
 | `BFF_BE_API_BASE_URL` | `http://localhost:8071` | upstream cf-be-api |
 | `BFF_TIMEOUT_S` | `12.0` | httpx Client timeout |
 | `BFF_ALLOWED_ORIGINS` | `["*"]` | CORS 화이트리스트 (prod 는 fe origin 으로 좁힘) |
+
+## Out of scope
+
+- `/admin/*`, `/graph/*` — be-api 직접 호출 (어드민 전용, VPC 내부 가정). 자세한 내용은 `backend/be-api/README.md` 참조.
+- 인증·캐싱·rate-limit — 후속 sprint
