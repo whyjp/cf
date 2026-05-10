@@ -1,5 +1,7 @@
-// be-api-go entrypoint. D-1 wired healthz; D-2 adds the postgres pool,
-// CampReader adapter, ListCamps use-case, and /sites handler.
+// be-api-go entrypoint. D-1 wired healthz; D-2 added postgres pool, CampReader,
+// ListCamps, /sites; D-3 added the optional ONNX embedder + pgvector +
+// semantic_search; D-4 wires the read-only sibling endpoints (/sites/{id},
+// /facets, /concepts, /themes, /marks, /featured-axes).
 //
 // FalkorDB and JSONL source are constructed lazily — failing to connect to
 // FalkorDB at boot does not block /sites since /sites doesn't depend on the
@@ -43,11 +45,30 @@ func main() {
 	}
 	defer pool.Close()
 
-	// Wire CampReader → ListCamps → SitesHandler.
+	// D-2: CampReader → ListCamps → SitesHandler.
 	campRepo := postgres.NewCampRepo(pool)
 	listCamps := usecases.NewListCamps(campRepo)
+
+	// D-4: Concept / Theme / Mark / Review / Facets readers.
+	conceptRepo := postgres.NewConceptRepo(pool)
+	themeRepo := postgres.NewThemeRepo(pool)
+	markRepo := postgres.NewMarkRepo(pool)
+	reviewRepo := postgres.NewReviewRepo(pool)
+	facetsRepo := postgres.NewFacetsRepo(pool)
+
+	getSiteDetail := usecases.NewGetSiteDetail(campRepo, reviewRepo, conceptRepo, themeRepo)
+	listFacets := usecases.NewListFacets(facetsRepo, themeRepo)
+	listConcepts := usecases.NewListConcepts(conceptRepo, campRepo)
+	listThemes := usecases.NewListThemes(themeRepo, campRepo)
+	listMarks := usecases.NewListMarks(markRepo)
+
 	handlers := &api.Handlers{
-		Sites: api.NewSitesHandler(listCamps),
+		Sites:      api.NewSitesHandler(listCamps),
+		SiteDetail: api.NewSiteDetailHandler(getSiteDetail),
+		Facets:     api.NewFacetsHandler(listFacets),
+		Concepts:   api.NewConceptsHandler(listConcepts),
+		Themes:     api.NewThemesHandler(listThemes),
+		Marks:      api.NewMarksHandler(listMarks),
 	}
 
 	// D-3: optional semantic search wiring. ONNX assets are large (~423 MB)
