@@ -27,11 +27,12 @@ B1~B3 동안 백엔드 root 핸들러가 이 파일을 서빙.
 
 ## 부팅
 
-가장 간단한 방법: `camfit-puller serve` 가 자동으로 이 디렉터리를 `/` 에 mount 합니다.
+가장 간단한 방법: `./scripts/dev-up.sh` 가 BFF (`cf-be-for-fe`, :8070) 를 띄우고 이 디렉터리를 `/` 에 mount 합니다.
 
 ```bash
-camfit-puller serve
+./scripts/dev-up.sh
 # → http://localhost:8070/
+./scripts/dev-down.sh
 ```
 
 별도로 띄우고 싶으면 (예: 디자인 작업 중):
