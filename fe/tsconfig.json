@@ -15,6 +15,7 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "useDefineForClassFields": true,
+    "noEmit": true,
     "types": ["vite/client", "vitest/globals"]
   },
   "include": ["src", "tests"],
