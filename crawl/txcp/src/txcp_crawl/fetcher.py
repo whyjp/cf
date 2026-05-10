@@ -9,7 +9,7 @@ from typing import Protocol
 
 import httpx
 
-from tkcp_crawl.stealth import StealthHttpxClient
+from txcp_crawl.stealth import StealthHttpxClient
 
 
 class Fetcher(Protocol):

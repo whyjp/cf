@@ -1,7 +1,7 @@
 """Polite stealth httpx client — UA rotation, jittered delay, retry/backoff.
 
 Vendored from camfit-puller stealth.py (CR-3 후속 분리 친화 — 동형 시그니처).
-변경점: robots.txt 처리는 호출자에 위임 (tkcp 의 robots.txt 는 전역 허용으로 검증됨, FINDINGS.md).
+변경점: robots.txt 처리는 호출자에 위임 (txcp 의 robots.txt 는 전역 허용으로 검증됨, FINDINGS.md).
 """
 from __future__ import annotations
 

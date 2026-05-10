@@ -11,8 +11,8 @@ import httpx
 import pytest
 import respx
 
-from tkcp_crawl import crawler as crawler_mod
-from tkcp_crawl.settings import Settings
+from txcp_crawl import crawler as crawler_mod
+from txcp_crawl.settings import Settings
 
 
 pytestmark = pytest.mark.asyncio

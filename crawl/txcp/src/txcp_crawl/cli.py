@@ -9,14 +9,14 @@ from pathlib import Path
 import typer
 from loguru import logger
 
-from tkcp_crawl import crawler as crawler_mod
-from tkcp_crawl.adapter import TkcpAdapter
-from tkcp_crawl.csv_writer import write_camps_csv
-from tkcp_crawl.fetcher import HttpxFetcher
-from tkcp_crawl.models import CampRecord
-from tkcp_crawl.settings import Settings
+from txcp_crawl import crawler as crawler_mod
+from txcp_crawl.adapter import TkcpAdapter
+from txcp_crawl.csv_writer import write_camps_csv
+from txcp_crawl.fetcher import HttpxFetcher
+from txcp_crawl.models import CampRecord
+from txcp_crawl.settings import Settings
 
-app = typer.Typer(no_args_is_help=True, add_completion=False, help="tkcp-crawl — m.thankqcamping.com 캠핑장 크롤러")
+app = typer.Typer(no_args_is_help=True, add_completion=False, help="txcp-crawl — m.thankqcamping.com 캠핑장 크롤러")
 
 
 def _setup_logger(level: str) -> None:

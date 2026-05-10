@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tkcp_crawl.adapter import TkcpAdapter
+from txcp_crawl.adapter import TkcpAdapter
 
 FIX = Path(__file__).parent / "fixtures" / "page1_BB000_sample.json"
 

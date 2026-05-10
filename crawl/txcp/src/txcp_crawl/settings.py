@@ -1,4 +1,4 @@
-"""Runtime settings — env override 가능 (TKCP_*)."""
+"""Runtime settings — env override 가능 (TXCP_*)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="TKCP_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="TXCP_", env_file=".env", extra="ignore")
 
     data_dir: Path = Field(default=Path("data"))
     delay_min: float = 1.5

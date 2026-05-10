@@ -1,4 +1,4 @@
-"""캠핑장 레코드 모델 — camfit-puller 의 CampRecord 와 동형, tkcp 필드 alias 추가."""
+"""캠핑장 레코드 모델 — camfit-puller 의 CampRecord 와 동형, txcp 필드 alias 추가."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -10,7 +10,7 @@ KR_LON_MIN, KR_LON_MAX = 124.0, 132.0
 
 
 class CampRecord(BaseModel):
-    """단일 캠핑장 레코드. camfit-puller CampRecord 와 동형 + tkcp 필드 alias.
+    """단일 캠핑장 레코드. camfit-puller CampRecord 와 동형 + txcp 필드 alias.
 
     extra="allow": 사이트 응답 schema 변동 흡수 (CR-S2 대응).
     """

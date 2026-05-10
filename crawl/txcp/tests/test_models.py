@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from tkcp_crawl.models import CampRecord
+from txcp_crawl.models import CampRecord
 
 
 def test_alias_choices_campSeq_to_id():

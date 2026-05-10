@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import statistics
 
-from tkcp_crawl.stealth import UA_POOL, DelayConfig, average_delay
+from txcp_crawl.stealth import UA_POOL, DelayConfig, average_delay
 
 
 def test_ua_pool_min_5():

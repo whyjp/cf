@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from tkcp_crawl.csv_writer import HEADER, write_camps_csv
-from tkcp_crawl.models import CampRecord
+from txcp_crawl.csv_writer import HEADER, write_camps_csv
+from txcp_crawl.models import CampRecord
 
 
 @pytest.fixture

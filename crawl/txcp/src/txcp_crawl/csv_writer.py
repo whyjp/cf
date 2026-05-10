@@ -5,10 +5,10 @@ import csv
 from pathlib import Path
 from typing import Iterable
 
-from tkcp_crawl.models import CampRecord
+from txcp_crawl.models import CampRecord
 
 
-# CSV 헤더 = camfit-puller 와 통합 가능한 공통 컬럼 + tkcp 보조.
+# CSV 헤더 = camfit-puller 와 통합 가능한 공통 컬럼 + txcp 보조.
 # magic-number-traceability: 컬럼 순서는 페이즈 04 verification + plan u1 §6 기준.
 HEADER = [
     "source",

@@ -1,7 +1,7 @@
 """Dedup — (source, id) PK 단일 record (I-3)."""
 from __future__ import annotations
 
-from tkcp_crawl.models import CampRecord
+from txcp_crawl.models import CampRecord
 
 
 def test_dedup_collapses_duplicate_campseq():

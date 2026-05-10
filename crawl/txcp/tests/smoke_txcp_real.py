@@ -1,9 +1,9 @@
-"""smoke — 실 사이트 1 페이지 호출. CI 비활성. TKCP_LIVE=1 시에만 실행.
+"""smoke — 실 사이트 1 페이지 호출. CI 비활성. TXCP_LIVE=1 시에만 실행.
 
 usage:
-    TKCP_LIVE=1 uv run python -m pytest tests/smoke_tkcp_real.py -v
+    TXCP_LIVE=1 uv run python -m pytest tests/smoke_txcp_real.py -v
 또는:
-    TKCP_LIVE=1 uv run python tests/smoke_tkcp_real.py
+    TXCP_LIVE=1 uv run python tests/smoke_txcp_real.py
 """
 from __future__ import annotations
 
@@ -12,18 +12,18 @@ import os
 
 import pytest
 
-from tkcp_crawl.adapter import TkcpAdapter
-from tkcp_crawl.fetcher import HttpxFetcher
-from tkcp_crawl.settings import Settings
+from txcp_crawl.adapter import TkcpAdapter
+from txcp_crawl.fetcher import HttpxFetcher
+from txcp_crawl.settings import Settings
 
 
 pytestmark = [pytest.mark.live, pytest.mark.asyncio]
 
 
-SKIP_REASON = "TKCP_LIVE=1 not set — smoke test disabled"
+SKIP_REASON = "TXCP_LIVE=1 not set — smoke test disabled"
 
 
-@pytest.mark.skipif(os.environ.get("TKCP_LIVE") != "1", reason=SKIP_REASON)
+@pytest.mark.skipif(os.environ.get("TXCP_LIVE") != "1", reason=SKIP_REASON)
 async def test_one_page_real():
     settings = Settings()
     adapter = TkcpAdapter()
@@ -50,7 +50,7 @@ async def test_one_page_real():
 
 
 if __name__ == "__main__":
-    if os.environ.get("TKCP_LIVE") != "1":
-        print("Set TKCP_LIVE=1 to run smoke test")
+    if os.environ.get("TXCP_LIVE") != "1":
+        print("Set TXCP_LIVE=1 to run smoke test")
         raise SystemExit(0)
     asyncio.run(test_one_page_real())

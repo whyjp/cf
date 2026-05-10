@@ -1,7 +1,7 @@
 """TkcpAdapter — site-specific build_payload + parse_camp_list_response.
 
 이 모듈만 사이트 종속. 다른 모듈 (models, csv_writer, stealth, state) 은 사이트 무관.
-후속 `crawlers/_shared/` 분리 시 본 모듈은 `crawlers/tkcp/adapter.py` 로 이동.
+후속 `crawlers/_shared/` 분리 시 본 모듈은 `crawlers/txcp/adapter.py` 로 이동.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import NamedTuple
 from loguru import logger
 from pydantic import ValidationError
 
-from tkcp_crawl.models import CampRecord
+from txcp_crawl.models import CampRecord
 
 
 class ListPageResult(NamedTuple):
