@@ -41,3 +41,14 @@ __pycache__/
 
 # crawler data dirs (also covered by per-package .gitignore)
 crawl/*/data/
+
+# SP-D D-0 ONNX PoC: model + tokenizer binaries (~hundreds of MB), runtime libs
+poc/d0-onnx/onnx_model/
+poc/d0-onnx/tokenizer/
+poc/d0-onnx/onnxruntime.dll
+poc/d0-onnx/onnxruntime.lib
+poc/d0-onnx/onnxruntime.so
+poc/d0-onnx/libonnxruntime*.dylib
+poc/d0-onnx/libonnxruntime*.so*
+poc/d0-onnx/d0-poc
+poc/d0-onnx/d0-poc.exe
