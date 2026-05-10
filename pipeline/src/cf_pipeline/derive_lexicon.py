@@ -14,7 +14,8 @@ use RELATIVE percentile thresholds (p80 = positive, p20 = negative) rather
 than absolute cut-offs.
 
 Output is written to:
-    src/cf_be_api/domain/intensifier_lexicon.py
+    pipeline/src/cf_be_api/domain/intensifier_lexicon.py
+(SP-D D-9: cf_be_api absorbed into cf-pipeline.)
 
 Re-running on the same corpus produces identical output (deterministic).
 """

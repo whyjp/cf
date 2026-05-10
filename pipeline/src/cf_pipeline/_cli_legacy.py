@@ -2,10 +2,12 @@
 
 Commands:
   crawl                 — legacy: cloakbrowser crawl → CSV (P1 utility, kept).
-  serve                 — start FastAPI server (api.py).
   info                  — print version + healthz.
   pipeline run-all      — run full P2 pipeline (ingest → ... → rebuild-graph).
   pipeline <stage>      — run a single pipeline stage.
+
+SP-D D-8 cutover removed `serve` (cf_be_api.api:app no longer exists — Go
+binary at backend/be-api/ owns the HTTP runtime, scripts/dev-up.sh boots it).
 """
 from __future__ import annotations
 
@@ -56,17 +58,6 @@ def crawl_cmd(
         console.print(f"[csv] {n} rows → {out}")
         return n
     asyncio.run(_run())
-
-
-@app.command()
-def serve(
-    host: str = typer.Option("0.0.0.0", help="bind"),
-    port: int = typer.Option(8070, help="포트"),
-    reload: bool = typer.Option(False, help="dev reload"),
-) -> None:
-    """FE static + read API 서비스."""
-    import uvicorn
-    uvicorn.run("cf_be_api.api:app", host=host, port=port, reload=reload)
 
 
 @app.command()
