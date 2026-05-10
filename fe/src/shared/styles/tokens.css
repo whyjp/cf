@@ -1,0 +1,18 @@
+/*
+ * Design tokens — extracted verbatim from the :root block in
+ * fe/index.legacy.html (lines 28-37).
+ *
+ * The featured-axis pin colors live in src/shared/constants.ts
+ * (AXIS_COLORS) so they're greppable from TS. The .pin-pin.<id> rules
+ * in legacy were CSS-side overrides of the same hex values.
+ */
+:root {
+  --moss: #2c4a3e;
+  --moss-deep: #1a2f26;
+  --moss-soft: #cfdcc9;
+  --bark: #6b4f2c;
+  --paper: #f4f1e8;
+  --paper-2: #ebe5d2;
+  --ink: #1a1a17;
+  --ember: #c8553d;
+}
