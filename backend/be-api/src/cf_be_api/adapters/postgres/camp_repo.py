@@ -99,7 +99,7 @@ class PostgresCampReader:
         concept=None, concepts_any=None,
         min_score=None, max_score=None,
         bbox=None, ids=None,
-        limit=2000,
+        limit=10000,
     ) -> list[Camp]:
         wh = []
         params: list = []
