@@ -16,14 +16,14 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2.7",
     "pydantic-settings>=2.4",
-    "cf-be-api",
+    # SP-D D-8 cutover: cf-be-api removed — be-api is now the Go binary at
+    # backend/be-api/. BFF talks to it over HTTP only (BFF_BE_API_BASE_URL).
+    # The one Python symbol BFF used (FEATURED_AXES) is now inlined into
+    # cf_be_for_fe/projection.py.
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.2", "respx>=0.21"]
-
-[tool.uv.sources]
-cf-be-api = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cf_be_for_fe"]
