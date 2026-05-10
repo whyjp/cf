@@ -5,6 +5,13 @@
  * The featured-axis pin colors live in src/shared/constants.ts
  * (AXIS_COLORS) so they're greppable from TS. The .pin-pin.<id> rules
  * in legacy were CSS-side overrides of the same hex values.
+ *
+ * Border tokens (C6, sprint final):
+ *   --border-faint  rgba(ink, 0.12) — header / list separator. 가장 약함.
+ *   --border-soft   rgba(ink, 0.18) — input / chip / 모달 outline. 기본.
+ *   --border-firm   rgba(ink, 0.32) — hover / active / focused outline.
+ * 본 sprint 에서는 정의만 추가 + TopBar / MobileShell etc 에서 spot 사용.
+ * 전면 sweep 은 후속 sprint (시각 회귀 테스트 동반).
  */
 :root {
   --moss: #2c4a3e;
@@ -15,4 +22,8 @@
   --paper-2: #ebe5d2;
   --ink: #1a1a17;
   --ember: #c8553d;
+
+  --border-faint: rgba(26, 26, 23, 0.12);
+  --border-soft: rgba(26, 26, 23, 0.18);
+  --border-firm: rgba(26, 26, 23, 0.32);
 }

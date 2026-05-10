@@ -50,11 +50,14 @@ export function MobileSearchOverlay({ open, onClose, onPick }: Props) {
   return (
     <div
       className="fixed inset-0 z-50 bg-white flex flex-col"
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      style={{
+        paddingTop: "env(safe-area-inset-top)",
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }}
     >
       <header
         className="h-14 px-2 flex items-center gap-2 border-b flex-shrink-0"
-        style={{ borderColor: "rgba(26,26,23,0.12)" }}
+        style={{ borderColor: "var(--border-faint)" }}
       >
         <button
           onClick={onClose}
