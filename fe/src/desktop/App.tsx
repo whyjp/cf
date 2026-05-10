@@ -17,6 +17,7 @@ import { EtaBar, minutesFrom } from "./components/EtaBar";
 import { FilterBar } from "./components/FilterBar";
 import { LocationPill } from "./components/LocationPill";
 import { MapView } from "./components/MapView";
+import { MobileToggle } from "./components/MobileToggle";
 import { SearchBox } from "./components/SearchBox";
 
 // `useDetail` is consumed inside DetailPanel; the import above is just to
@@ -344,6 +345,7 @@ export function App() {
             <a href="/graph.html" className="btn">
               그래프 →
             </a>
+            <MobileToggle />
           </div>
         </div>
         <div className="max-w-[1500px] mx-auto px-6 pb-4 space-y-3">
