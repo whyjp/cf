@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Run pytest "not live" across all 4 packages.
+# Run pytest "not live" across all packages -- backend split: cf-be-api + cf-be-for-fe.
 . "$(dirname "$0")/lib/env.sh"
 . "$(dirname "$0")/lib/common.sh"
 
 cd "$REPO_ROOT"
 fail=0
-for pkg in txcp-crawl camfit-crawl cf-be-api cf-pipeline; do
+for pkg in txcp-crawl camfit-crawl cf-be-api cf-be-for-fe cf-pipeline; do
     log_info "=== $pkg ==="
     case "$pkg" in
         txcp-crawl)    path=crawl/txcp ;;
         camfit-crawl)  path=crawl/camfit ;;
-        cf-be-api)     path=backend/be-api ;;
+        cf-be-api)     path=backend/be-api/tests ;;
+        cf-be-for-fe)  path=backend/be-for-fe/tests ;;
         cf-pipeline)   path=pipeline ;;
     esac
     if ! "$UV" run --package "$pkg" pytest "$path" -m "not live and not integration" --tb=short 2>&1 | tail -5; then
