@@ -1,0 +1,3 @@
+# seed dumps are large binary blobs — track manifest only, not the .dump/.rdb files
+*.dump
+*.rdb
