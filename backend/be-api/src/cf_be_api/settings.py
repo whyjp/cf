@@ -37,9 +37,13 @@ class Settings(BaseSettings):
 
     # NOTE: post SP-A A1 directory move adds one level (backend/be-api/src/cf_be_api).
     # SP-B B4 dropped `fe_dir` here — be-api no longer serves static files;
-    # the BFF (cf-be-for-fe) owns fe/dist/. data_dir kept for legacy parity.
-    # parents[3] = backend/ (legacy data/ relative anchor).
-    data_dir: Path = Path(__file__).resolve().parents[3] / "data"
+    # the BFF (cf-be-for-fe) owns fe/dist/. data_dir is consumed by
+    # `LocalReplaySource` (see container.py) to read camps_dedup.json /
+    # details/*.json / reviews/*.json scraped by the camfit crawl package.
+    # parents[4] resolves repo root from backend/be-api/src/cf_be_api/settings.py;
+    # the canonical scrape sink is `crawl/camfit/data/`. Override at runtime via
+    # `CAMFIT_DATA_DIR=...` (env_prefix=CAMFIT_).
+    data_dir: Path = Path(__file__).resolve().parents[4] / "crawl" / "camfit" / "data"
 
     log_level: str = "INFO"
 
