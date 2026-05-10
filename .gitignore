@@ -72,3 +72,7 @@ backend/be-api/assets-onnx/
 backend/be-api/.gocache/
 backend/be-api/.gotmp/
 backend/be-api/*.test.exe
+
+# Playwright test artifacts
+fe/test-results/
+fe/playwright-report/
