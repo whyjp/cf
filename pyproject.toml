@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 
 [tool.uv.workspace]
 # Members get added as each sprint moves a package into place.
-members = ["crawl/txcp"]
+members = ["crawl/txcp", "crawl/camfit"]
 
 # [tool.uv.sources]
 # cf-backend = { workspace = true }   # uncomment when backend/ exists (Sprint 5)
