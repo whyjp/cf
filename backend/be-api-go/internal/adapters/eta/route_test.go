@@ -1,4 +1,4 @@
-package route
+package eta
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/whyjp/etago/internal/parse"
+	"github.com/whyjp/cf/be-api-go/internal/adapters/eta/parse"
 )
 
 type stubProvider struct {

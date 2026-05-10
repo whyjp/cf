@@ -1,4 +1,4 @@
-package route
+package eta
 
 import (
 	"context"
@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/whyjp/etago/internal/parse"
+	"github.com/whyjp/cf/be-api-go/internal/adapters/eta/parse"
 )
 
 // PerSourceTimeout caps each provider attempt. The total wall clock for a
-// fallback chain is bounded by ctx (CLI default 12s), so this constant keeps
-// any single hung provider from consuming the whole budget.
+// fallback chain is bounded by the caller's ctx (be-api default 12s, see
+// /eta?timeout_s=…), so this constant keeps any single hung provider from
+// consuming the whole budget.
 const PerSourceTimeout = 6 * time.Second
 
 // GetDuration walks providers sequentially. The first one that yields a

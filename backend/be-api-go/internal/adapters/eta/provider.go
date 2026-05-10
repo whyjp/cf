@@ -1,17 +1,20 @@
-// Package route fetches drive ETA from anonymous public web endpoints of
-// Korean map services and orchestrates fallback between them.
-package route
+// Package eta fetches drive ETA from public endpoints of Korean map
+// services (Naver NCP Directions 5, Kakao K1 + OSRM) and orchestrates
+// fallback between them. Absorbed from the standalone `etago` Go binary
+// in SP-D D-5; the be-api now embeds providers directly and serves
+// /eta /eta/batch /eta/cache.
+package eta
 
 import (
 	"context"
 	"errors"
 
-	"github.com/whyjp/etago/internal/parse"
+	"github.com/whyjp/cf/be-api-go/internal/adapters/eta/parse"
 )
 
-// Duration is the unit result returned to the CLI. LatencyMs records the
-// adapter-side wall time so --verbose can attribute slowness without the CLI
-// having to instrument its own timer.
+// Duration is the unit result. LatencyMs records the adapter-side wall
+// time for tracing/observability — the CLI used it for --verbose; in
+// the be-api it surfaces in structured logs.
 type Duration struct {
 	Min       int
 	Source    string
@@ -26,8 +29,9 @@ type Provider interface {
 	Lookup(ctx context.Context, in parse.NormalizedInput) (Duration, error)
 }
 
-// Sentinel errors. Callers (CLI/main) inspect via errors.Is to map exit codes:
-// input → 2, external → 3, unknown → 1.
+// Sentinel errors. Callers inspect via errors.Is. The original etago CLI
+// mapped these to exit codes (input → 2, external → 3, unknown → 1); the
+// be-api uses them to choose HTTP status (4xx vs 5xx) per route.
 var (
 	ErrEmptyPath      = errors.New("provider returned empty route")
 	ErrInputRejected  = errors.New("provider rejected input")

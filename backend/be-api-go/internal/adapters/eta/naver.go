@@ -1,4 +1,4 @@
-package route
+package eta
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/whyjp/etago/internal/parse"
+	"github.com/whyjp/cf/be-api-go/internal/adapters/eta/parse"
 )
 
 // NaverProvider talks to the Naver Cloud Platform Maps APIs when NCP
@@ -42,20 +42,22 @@ type NaverProvider struct {
 }
 
 // NewNaverProvider wires the live Naver endpoints. NCP credentials are
-// read from the environment at construction time so a process that
-// loads .env first picks them up automatically.
-func NewNaverProvider(client *http.Client, ua string) *NaverProvider {
+// passed in explicitly — main.go pulls them from settings.Config (which
+// reads them via envconfig) so the adapter has no envvar dependency.
+// Pass empty strings to construct a credentials-less provider that
+// falls back to the anonymous (captcha-prone) search path.
+func NewNaverProvider(client *http.Client, ua, ncpClientID, ncpClientSecret string) *NaverProvider {
 	return &NaverProvider{
-		HTTP:            client,
-		UserAgent:       ua,
-		SearchBase:      "https://map.naver.com/p/api/search/instant-search",
+		HTTP:       client,
+		UserAgent:  ua,
+		SearchBase: "https://map.naver.com/p/api/search/instant-search",
 		// NCP Maps APIs migrated host: naveropenapi.apigw.ntruss.com →
 		// maps.apigw.ntruss.com. The legacy host now returns 403 even
 		// for valid keys.
-		GeocodeBase:   "https://maps.apigw.ntruss.com/map-geocode/v2/geocode",
-		DirectionBase: "https://maps.apigw.ntruss.com/map-direction/v1/driving",
-		NcpClientID:     readEnv("NCP_CLIENT_ID"),
-		NcpClientSecret: readEnv("NCP_CLIENT_SECRET"),
+		GeocodeBase:     "https://maps.apigw.ntruss.com/map-geocode/v2/geocode",
+		DirectionBase:   "https://maps.apigw.ntruss.com/map-direction/v1/driving",
+		NcpClientID:     ncpClientID,
+		NcpClientSecret: ncpClientSecret,
 		Router:          NewOSRM(client),
 	}
 }
@@ -397,5 +399,3 @@ func numericFromAny(v any) (float64, bool) {
 	return 0, false
 }
 
-// readEnv exists so tests can stub env reads without poking os.Getenv.
-var readEnv = func(key string) string { return getenv(key) }

@@ -1,4 +1,4 @@
-package route
+package eta
 
 import (
 	"context"
@@ -37,7 +37,7 @@ func (o *OSRM) DurationMin(ctx context.Context, sLat, sLng, eLat, eLng float64) 
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "etago/1.0 (+https://github.com/whyjp/etago)")
+	req.Header.Set("User-Agent", "cf-be-api-go/1.0 (+https://github.com/whyjp/cf)")
 
 	resp, err := o.HTTP.Do(req)
 	if err != nil {

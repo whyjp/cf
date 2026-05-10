@@ -1,4 +1,4 @@
-package route
+package eta
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/whyjp/etago/internal/parse"
+	"github.com/whyjp/cf/be-api-go/internal/adapters/eta/parse"
 )
 
 // KakaoProvider resolves place names against Kakao Map's anonymous public
