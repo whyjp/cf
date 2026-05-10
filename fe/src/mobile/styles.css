@@ -1,0 +1,34 @@
+@import "../shared/styles/tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Mobile-specific reset.
+ *
+ * - 100dvh — dynamic viewport height; survives mobile-Safari URL-bar
+ *   collapse/expand. Falls back to 100vh implicitly via the cascade
+ *   when dvh isn't supported.
+ * - overflow:hidden on body — BottomSheet 가 자체 스크롤 컨테이너이므로
+ *   bg-page 자체는 스크롤되면 안 됨 (rubber-band → 시트 드래그 충돌).
+ * - 색/폰트 토큰은 데스크탑과 동일 (shared/styles/tokens.css).
+ */
+html, body, #root {
+  height: 100dvh;
+  margin: 0;
+}
+body {
+  font-family: "Pretendard Variable", Pretendard, ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR",
+    sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  overflow: hidden;
+  letter-spacing: -0.01em;
+}
+
+.display {
+  font-feature-settings: "ss01", "tnum";
+  letter-spacing: -0.02em;
+}
