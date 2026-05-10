@@ -1,0 +1,16 @@
+# SP-D D-3: ONNX runtime libs and model assets — large (~423MB ko-sroberta)
+# and produced/copied at setup time per per-platform instructions in D-7.
+onnxruntime.dll
+onnxruntime.so
+onnxruntime.dylib
+onnxruntime.lib
+assets-onnx/
+internal/adapters/embed/assets/
+
+# go binaries
+be-api
+be-api.exe
+
+# test cache fragments
+*.test
+*.test.exe
