@@ -1,22 +1,52 @@
 """FE-friendly projection of be-api raw responses.
 
 Moved from cf_be_api/api.py during SP-A sprint A3.
-
-be-api now returns raw domain dicts (Camp.model_dump() shape — `geo`/`region`
-are nested dicts, snake_case fields). This module replays the *exact* fe-row
-shape that the legacy be-api in-process projection produced — byte-identical
-contract verified by tests/fixtures/regression/before_a3_*.json.
-
-Adding a new boolean axis only requires editing
-`cf_be_api.domain.featured_axes.FEATURED_AXES`; the BFF re-derives `has_<id>`
-from that registry on every call.
+SP-D D-8 (cutover): inlined FEATURED_AXES — no longer imports from cf_be_api,
+since be-api is now the Go binary. The Go side has its own equivalent registry
+in `internal/domain/featured_axes.go`; both must be kept in sync when adding
+a new axis. (Source-of-truth gate: a regression test compares the two.)
 """
 from __future__ import annotations
-from typing import Any
-
-from cf_be_api.domain.featured_axes import FEATURED_AXES
+from typing import Any, TypedDict
 
 from .constants import _LANDLOCKED_SIDO, _MARITIME_TOKENS, _TYPE_KO
+
+
+class FeaturedAxis(TypedDict):
+    id: str            # snake_case, becomes r.has_<id>
+    ko: str            # display label (Korean)
+    icon: str          # emoji
+    tone: str          # "" | "warm" | "bark"
+    keywords: list[str]
+
+
+# Inlined from former cf_be_api/domain/featured_axes.py (SP-D D-8 cutover).
+# When adding an axis, mirror it in the Go side
+# (backend/be-api/internal/domain/featured_axes.go).
+FEATURED_AXES: list[FeaturedAxis] = [
+    {"id": "valley",     "ko": "계곡",     "icon": "🌊", "tone": "",
+     "keywords": ["valley", "계곡"]},
+    {"id": "kids",       "ko": "키즈캠핑", "icon": "🧒", "tone": "warm",
+     "keywords": ["kids", "키즈", "아이"]},
+    {"id": "trampoline", "ko": "트램펄린", "icon": "🤸", "tone": "bark",
+     "keywords": ["trampoline", "trampolin",
+                  "트램펄린", "트램폴린", "트렘펄린", "트렘폴린", "트램벌린",
+                  "방방", "퐁퐁"]},
+    {"id": "halloween",  "ko": "할로윈",   "icon": "🎃", "tone": "warm",
+     "keywords": ["할로윈", "핼러윈", "핼로윈", "halloween"]},
+    {"id": "cherry",     "ko": "벚꽃",     "icon": "🌸", "tone": "warm",
+     "keywords": ["벚꽃", "벚나무"]},
+    {"id": "autumn",     "ko": "단풍",     "icon": "🍁", "tone": "bark",
+     "keywords": ["단풍"]},
+]
+
+assert len({a["id"] for a in FEATURED_AXES}) == len(FEATURED_AXES), \
+    "FEATURED_AXES has duplicate id"
+for _a in FEATURED_AXES:
+    assert _a["keywords"], f"FEATURED_AXES['{_a['id']}'] has empty keywords"
+    assert _a["tone"] in ("", "warm", "bark"), \
+        f"FEATURED_AXES['{_a['id']}'] has invalid tone {_a['tone']!r}"
+del _a
 
 
 def filter_maritime_for_inland(items, sido) -> list:
@@ -64,11 +94,12 @@ def camp_to_fe_row(c: dict) -> dict:
     The map view in fe reads `r.lat`/`r.lon`/`r.sido` directly (no `.geo.lat`
     traversal), and the chip rendering iterates `r.categories`.
 
-    Boolean axis flags `has_<id>` are generated dynamically from
-    `cf_be_api.domain.featured_axes.FEATURED_AXES` — adding a new axis there
-    surfaces it on every row without further edits to this function. Each
-    axis matches case-insensitive substrings against a haystack joined from
-    every meaningful tag source plus description + brief.
+    Boolean axis flags `has_<id>` are generated dynamically from the
+    module-level FEATURED_AXES list — adding a new axis there surfaces it on
+    every row without further edits to this function. Each axis matches
+    case-insensitive substrings against a haystack joined from every
+    meaningful tag source plus description + brief. Mirror the axis in
+    backend/be-api/internal/domain/featured_axes.go (Go side).
 
     Original: cf_be_api/api.py:_camp_to_fe_row (took a Camp model object).
     """

@@ -5,7 +5,7 @@ requires-python = ">=3.11"
 [manifest]
 members = [
     "camfit-crawl",
-    "cf-be-api",
+    "cf-be-api-py",
     "cf-be-for-fe",
     "cf-pipeline",
     "cf-workspace",
@@ -118,13 +118,12 @@ wheels = [
 ]
 
 [[package]]
-name = "cf-be-api"
+name = "cf-be-api-py"
 version = "0.1.0"
-source = { editable = "backend/be-api" }
+source = { editable = "backend/be-api-py" }
 dependencies = [
     { name = "alembic" },
     { name = "falkordb" },
-    { name = "fastapi" },
     { name = "httpx" },
     { name = "loguru" },
     { name = "lxml" },
@@ -139,7 +138,6 @@ dependencies = [
     { name = "sentence-transformers" },
     { name = "sqlalchemy" },
     { name = "tenacity" },
-    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.optional-dependencies]
@@ -156,7 +154,6 @@ testcontainers = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "falkordb", specifier = ">=1.0.10" },
-    { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "lxml", specifier = ">=5.2" },
@@ -175,7 +172,6 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "tenacity", specifier = ">=8.2" },
     { name = "testcontainers", extras = ["postgres"], marker = "extra == 'testcontainers'", specifier = ">=4.7" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
 provides-extras = ["dev", "testcontainers"]
 
@@ -184,7 +180,6 @@ name = "cf-be-for-fe"
 version = "0.1.0"
 source = { editable = "backend/be-for-fe" }
 dependencies = [
-    { name = "cf-be-api" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -200,7 +195,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cf-be-api", editable = "backend/be-api" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.7" },
@@ -216,7 +210,7 @@ name = "cf-pipeline"
 version = "0.1.0"
 source = { editable = "pipeline" }
 dependencies = [
-    { name = "cf-be-api" },
+    { name = "cf-be-api-py" },
     { name = "loguru" },
     { name = "pydantic" },
     { name = "rich" },
@@ -231,7 +225,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cf-be-api", editable = "backend/be-api" },
+    { name = "cf-be-api-py", editable = "backend/be-api-py" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
