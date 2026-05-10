@@ -14,7 +14,7 @@ use RELATIVE percentile thresholds (p80 = positive, p20 = negative) rather
 than absolute cut-offs.
 
 Output is written to:
-    src/camfit_puller/domain/intensifier_lexicon.py
+    src/cf_backend/domain/intensifier_lexicon.py
 
 Re-running on the same corpus produces identical output (deterministic).
 """
@@ -271,7 +271,7 @@ def main() -> None:
         type=Path,
         default=Path(__file__).parent.parent
         / "src"
-        / "camfit_puller"
+        / "cf_backend"
         / "domain"
         / "intensifier_lexicon.py",
         help="Output Python file path",

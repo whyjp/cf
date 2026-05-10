@@ -11,8 +11,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from camfit_puller.settings import Settings
-from camfit_puller.container import Container
+from cf_backend.settings import Settings
+from cf_backend.container import Container
 from rich.console import Console
 
 

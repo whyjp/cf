@@ -12,9 +12,9 @@ Curate this list by hand. Update when camfit adds new themes/collections.
 from __future__ import annotations
 import sys
 
-from camfit_puller.settings import Settings
-from camfit_puller.container import Container
-from camfit_puller.domain.models import Concept
+from cf_backend.settings import Settings
+from cf_backend.container import Container
+from cf_backend.domain.models import Concept
 from rich.console import Console
 
 
